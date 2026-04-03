@@ -12,6 +12,7 @@ import {
   checkConnection, getTrends, getHourlySales, getTopSellers, getOnlinePrices,
   type TrendEntry, type HourlySalesEntry, type TopSeller, type OnlinePrice,
 } from '../lib/jarvis'
+import { serperShoppingSearch } from '../lib/serper'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../lib/db'
 
@@ -332,13 +333,31 @@ export default function InsightView() {
     const results: CompetitorResult[] = []
     for (const seller of top5) {
       try {
-        const data = await getOnlinePrices(seller.description)
-        const priceResults = data?.results ?? []
+        // Serper Shopping (budget-gated) + JARVISmart in parallel
+        const [shopResults, data] = await Promise.all([
+          serperShoppingSearch(seller.description).catch(() => []),
+          getOnlinePrices(seller.description).catch(() => ({ results: [] as OnlinePrice[] })),
+        ])
+
+        // Merge: Serper shopping results first, then JARVISmart
+        const seen = new Set<string>()
+        const priceResults: OnlinePrice[] = []
+        for (const s of shopResults) {
+          const key = `${s.source}|${s.title}`.toLowerCase()
+          if (!seen.has(key) && s.price > 0) {
+            seen.add(key)
+            priceResults.push({ source: s.source, name: s.title, price: s.price, url: s.link, size: '' })
+          }
+        }
+        for (const r of (data?.results ?? [])) {
+          const key = `${r.source}|${r.name}`.toLowerCase()
+          if (!seen.has(key)) { seen.add(key); priceResults.push(r) }
+        }
+
         const best = priceResults.length > 0
           ? priceResults.reduce((min, r) => r.price < min.price ? r : min, priceResults[0])
           : null
 
-        // Try to find our sell price from db products
         const dbProduct = products?.find(p => p.itemCode === seller.itemCode)
         const ourPrice = dbProduct?.sellPrice ?? (seller.revenue / Math.max(seller.quantitySold, 1))
 

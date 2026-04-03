@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, ExternalLink, Loader2, TrendingDown, TrendingUp, Minus } from 'lucide-react'
 import { getOnlinePrices, type OnlinePrice } from '../lib/jarvis'
+import { serperShoppingSearch } from '../lib/serper'
 
 interface CompetitivePriceSheetProps {
   open: boolean
@@ -28,8 +29,27 @@ export default function CompetitivePriceSheet({
     setError(null)
     setResults([])
     try {
-      const data = await getOnlinePrices(description)
-      setResults(data.results)
+      // Serper Shopping (budget-gated) + JARVISmart in parallel
+      const [shopResults, jarvisData] = await Promise.all([
+        serperShoppingSearch(description).catch(() => []),
+        getOnlinePrices(description).catch(() => ({ results: [] as OnlinePrice[] })),
+      ])
+      const seen = new Set<string>()
+      const merged: OnlinePrice[] = []
+      // Serper results first (fresher, structured)
+      for (const s of shopResults) {
+        const key = `${s.source}|${s.title}`.toLowerCase()
+        if (!seen.has(key) && s.price > 0) {
+          seen.add(key)
+          merged.push({ source: s.source, name: s.title, price: s.price, url: s.link, size: '' })
+        }
+      }
+      // Then JARVISmart results
+      for (const r of jarvisData.results) {
+        const key = `${r.source}|${r.name}`.toLowerCase()
+        if (!seen.has(key)) { seen.add(key); merged.push(r) }
+      }
+      setResults(merged)
     } catch (err) {
       setError((err as Error).message || 'Failed to fetch competitor prices')
     } finally {

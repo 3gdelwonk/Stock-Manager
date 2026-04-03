@@ -1,11 +1,11 @@
 // ═══════════════════════════════════════════════
 // Product Image Service — Grocery Manager
-// Priority: local IndexedDB cache → JARVISmart server → DDG (bulk) → Serper (manual picker fallback)
+// Priority: local IndexedDB cache → JARVISmart server → DDG/Serper (two-tier)
 // ═══════════════════════════════════════════════
 
 import { db } from './db'
+import { serperImageSearch, serperImageSearchMulti, canUseSerper } from './serper'
 
-const DEFAULT_SERPER_KEY = '75b23242598b5ef681209b443ae89c9a04e09ca6379e4c32768a56600be80d2d'
 // ── Config helpers ──────────────────────────────────────────────────────────
 
 function getJarvisBaseUrl(): string {
@@ -14,12 +14,9 @@ function getJarvisBaseUrl(): string {
 function getJarvisApiKey(): string {
   return localStorage.getItem('grocery-manager-jarvis-key') || (import.meta.env.VITE_JARVIS_API_KEY as string) || 'jmart_sk_7f3a9c2e1b4d8f6a0e5c3b9d'
 }
-function getSerperApiKey(): string {
-  return localStorage.getItem('grocery-manager-serper-api-key') || (import.meta.env.VITE_SERPER_API_KEY as string) || DEFAULT_SERPER_KEY
-}
 
 export function isImageSearchConfigured(): boolean {
-  return !!getJarvisBaseUrl() || !!getSerperApiKey()
+  return !!getJarvisBaseUrl()
 }
 
 // ── JARVISmart image endpoints ──────────────────────────────────────────────
@@ -54,17 +51,13 @@ function isPlaceholderUrl(url: string): boolean {
   return PLACEHOLDER_RE.test(url) || STOCK_PHOTO_RE.test(url)
 }
 
-// ── Search priority config ─────────────────────────────────────────────────
+// ── Search priority config (for manual picker / single refetch) ────────────
 
 function getSearchPriority(): 'ddg' | 'serper' {
   return (localStorage.getItem('grocery-manager-search-priority') as 'ddg' | 'serper') || 'ddg'
 }
 
-// ── Query building ──────────────────────────────────────────────────────────
-
-// PWA sends raw POS description + department to JARVISmart server,
-// which handles abbreviation expansion, cleaning, and query building.
-// This is just a simple fallback for Serper (manual picker).
+// ── Query building (simple fallback for Serper manual picker) ──────────────
 
 function cleanDescription(desc: string): string {
   let clean = desc
@@ -102,28 +95,6 @@ async function ddgImageSearch(description: string, department: string, barcode?:
   } catch { return 'error' }
 }
 
-// ── Serper image search (fallback / manual picker) ──────────────────────────
-
-interface SerperImageResult { title: string; imageUrl: string; imageWidth: number; imageHeight: number; source: string; domain: string }
-interface SerperResponse { images?: SerperImageResult[]; message?: string }
-
-async function serperImageSearch(query: string): Promise<string | null | 'error'> {
-  const apiKey = getSerperApiKey()
-  if (!apiKey) return 'error'
-  try {
-    const res = await fetch('https://google.serper.dev/images', {
-      method: 'POST',
-      headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: query, num: 5 }),
-    })
-    if (!res.ok) return 'error'
-    const data: SerperResponse = await res.json()
-    if (!data.images || data.images.length === 0) return null
-    const img = data.images.find(i => i.imageWidth >= 100 && i.imageHeight >= 100 && !isPlaceholderUrl(i.imageUrl))
-    return img?.imageUrl ?? data.images[0]?.imageUrl ?? null
-  } catch { return 'error' }
-}
-
 // ── Cache helpers ───────────────────────────────────────────────────────────
 
 export async function getCachedImageUrl(itemCode: string): Promise<string | null> {
@@ -135,14 +106,16 @@ export async function deleteCachedImage(itemCode: string): Promise<void> {
   await db.imageCache.delete(itemCode)
 }
 
-// ── Fetch & cache (used by bulk prefetch) ───────────────────────────────────
-// Flow: local cache → JARVISmart → DDG Worker → Serper fallback
+// ── Fetch & cache (used by bulk prefetch + single refetch) ─────────────────
+// searchTier controls which engine to use during prefetch:
+//   'serper' → Serper first (budget-gated), DDG fallback
+//   'ddg'    → DDG only, skip Serper
+//   undefined → use manual search priority toggle (for picker/refetch)
 
-// Returns: { url, allErrored }
-// url = image URL or null (no image found but search worked)
-// allErrored = true when every source returned an API error (not "no results")
 export async function fetchAndCacheImage(
-  itemCode: string, description: string, department: string, barcode?: string | null,
+  itemCode: string, description: string, department: string,
+  barcode?: string | null,
+  searchTier?: 'serper' | 'ddg',
 ): Promise<{ url: string | null; allErrored: boolean }> {
   try {
     const cached = await getCachedImageUrl(itemCode)
@@ -166,16 +139,27 @@ export async function fetchAndCacheImage(
     const trySerper = async () => {
       const r = await serperImageSearch(buildSearchQuery(description, department))
       if (r !== 'error') { anySearchWorked = true; if (r) imageUrl = r }
-      if (!imageUrl && barcode) {
+      // Barcode retry only for manual picker (no searchTier), not bulk prefetch
+      if (!imageUrl && barcode && !searchTier) {
         const r2 = await serperImageSearch(buildSearchQuery(description, department, barcode))
         if (r2 !== 'error') { anySearchWorked = true; if (r2) imageUrl = r2 }
       }
     }
 
-    // 2 & 3. Search in priority order (configurable in Settings)
-    const [primary, fallback] = getSearchPriority() === 'serper' ? [trySerper, tryDdg] : [tryDdg, trySerper]
-    await primary()
-    if (!imageUrl) await fallback()
+    // 2 & 3. Search based on tier or manual priority
+    if (searchTier === 'serper') {
+      // Two-tier prefetch: Serper first (if budget allows), DDG fallback
+      if (canUseSerper('images')) await trySerper()
+      if (!imageUrl) await tryDdg()
+    } else if (searchTier === 'ddg') {
+      // DDG only — skip Serper to save budget
+      await tryDdg()
+    } else {
+      // Manual picker / refetch — use priority toggle
+      const [primary, fallback] = getSearchPriority() === 'serper' ? [trySerper, tryDdg] : [tryDdg, trySerper]
+      await primary()
+      if (!imageUrl) await fallback()
+    }
 
     if (imageUrl) {
       await db.imageCache.put({ itemCode, imageUrl, fetchedAt: new Date() })
@@ -184,13 +168,11 @@ export async function fetchAndCacheImage(
       return { url: imageUrl, allErrored: false }
     }
 
-    // At least one search worked but found nothing — cache empty to avoid retry
     if (anySearchWorked) {
       await db.imageCache.put({ itemCode, imageUrl: '', fetchedAt: new Date() })
       return { url: null, allErrored: false }
     }
 
-    // All sources errored — don't cache, allow retry later
     return { url: null, allErrored: true }
   } catch {
     return { url: null, allErrored: true }
@@ -210,11 +192,10 @@ export interface PrefetchProgress {
 }
 
 export async function prefetchImages(
-  items: { itemCode: string; description: string; department: string; barcode?: string | null }[],
+  items: { itemCode: string; description: string; department: string; barcode?: string | null; searchTier?: 'serper' | 'ddg' }[],
   onProgress?: (p: PrefetchProgress) => void,
   signal?: AbortSignal,
 ): Promise<{ fetched: number; found: number }> {
-  // First pass: filter out already-cached items
   const uncached: typeof items = []
   let skipped = 0
   try {
@@ -224,9 +205,7 @@ export async function prefetchImages(
       if (existing) { skipped++; continue }
       uncached.push(item)
     }
-  } catch {
-    // IndexedDB error — proceed with what we have
-  }
+  } catch { /* IndexedDB error */ }
 
   if (uncached.length === 0) {
     onProgress?.({ total: 0, done: 0, found: 0, errors: 0, skipped, current: '' })
@@ -239,7 +218,7 @@ export async function prefetchImages(
   for (const item of uncached) {
     if (signal?.aborted) break
     try {
-      const result = await fetchAndCacheImage(item.itemCode, item.description, item.department, item.barcode)
+      const result = await fetchAndCacheImage(item.itemCode, item.description, item.department, item.barcode, item.searchTier)
       done++
       if (result.url) {
         found++
@@ -248,7 +227,6 @@ export async function prefetchImages(
         errors++
         consecutiveErrors++
       } else {
-        // No image found but search worked — not an error
         consecutiveErrors = 0
       }
     } catch {
@@ -285,7 +263,7 @@ export async function getImageCacheStats(): Promise<{ total: number; found: numb
   return { total: all.length, found, failed: all.length - found }
 }
 
-// ── Manual image picker (uses Serper for quality) ───────────────────────────
+// ── Manual image picker (uses Serper + DDG) ────────────────────────────────
 
 export interface ImageOption { imageUrl: string; title: string; source: string; width: number; height: number }
 
@@ -295,27 +273,17 @@ export async function searchProductImages(
   const seen = new Set<string>()
   const results: ImageOption[] = []
 
-  // Try Serper first (better quality for manual selection)
-  const apiKey = getSerperApiKey()
-  if (apiKey) {
+  // Try Serper first (better quality for manual selection, budget-gated)
+  if (canUseSerper('images')) {
     const queries = [buildSearchQuery(description, department), ...(barcode ? [buildSearchQuery(description, department, barcode)] : [])]
     for (const query of queries) {
-      try {
-        const res = await fetch('https://google.serper.dev/images', {
-          method: 'POST',
-          headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ q: query, num: 10 }),
-        })
-        if (!res.ok) continue
-        const data: SerperResponse = await res.json()
-        if (!data.images) continue
-        for (const img of data.images) {
-          if (img.imageWidth >= 80 && img.imageHeight >= 80 && !seen.has(img.imageUrl)) {
-            seen.add(img.imageUrl)
-            results.push({ imageUrl: img.imageUrl, title: img.title, source: img.domain, width: img.imageWidth, height: img.imageHeight })
-          }
+      const imgs = await serperImageSearchMulti(query, 10)
+      for (const img of imgs) {
+        if (!seen.has(img.imageUrl)) {
+          seen.add(img.imageUrl)
+          results.push(img)
         }
-      } catch { /* skip */ }
+      }
     }
   }
 

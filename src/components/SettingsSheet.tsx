@@ -2,7 +2,24 @@ import { useState, useRef, useEffect } from 'react'
 import { clearAllData } from '../lib/db'
 import { getStockLevels } from '../lib/jarvis'
 import { prefetchImages, isImageSearchConfigured, clearImageCache, clearFailedImageCache, getImageCacheStats, type PrefetchProgress } from '../lib/images'
+import {
+  getSerperUsage, getSerperBudget, setSerperBudget, resetSerperUsage,
+  getSerperTierSize, setSerperTierSize, computeImagePriority, canUseSerper,
+  type SerperUsage, type SerperBudget,
+} from '../lib/serper'
 import ImportView from './ImportView'
+
+function UsageBar({ used, total, color }: { used: number; total: number; color: string }) {
+  const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[10px] text-gray-400 w-8 text-right">{Math.round(pct)}%</span>
+    </div>
+  )
+}
 
 export default function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [leadTime, setLeadTime] = useState(() => {
@@ -32,6 +49,11 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [searchPriority, setSearchPriority] = useState(() => localStorage.getItem('grocery-manager-search-priority') || 'ddg')
   const abortRef = useRef<AbortController | null>(null)
 
+  // Serper budget state
+  const [usage, setUsage] = useState<SerperUsage>(() => getSerperUsage())
+  const [budget, setBudget] = useState<SerperBudget>(() => getSerperBudget())
+  const [tierSize, setTierSizeState] = useState(() => getSerperTierSize())
+
   useEffect(() => { getImageCacheStats().then(setCacheStats) }, [])
 
   function saveLead() {
@@ -56,13 +78,23 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
-
   function saveExpiryRed() {
     localStorage.setItem('grocery-manager-expiry-red', String(expiryRed))
   }
 
   function saveExpiryAmber() {
     localStorage.setItem('grocery-manager-expiry-amber', String(expiryAmber))
+  }
+
+  function saveBudget(updates: Partial<SerperBudget>) {
+    const next = { ...budget, ...updates }
+    setBudget(next)
+    setSerperBudget(next)
+  }
+
+  function saveTierSize(n: number) {
+    setTierSizeState(n)
+    setSerperTierSize(n)
   }
 
   async function handlePrefetch() {
@@ -76,13 +108,23 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
     abortRef.current = controller
     try {
       const stock = await getStockLevels({ limit: 50000 })
-      // Fetch ALL stock (not department-filtered), sort by avg daily qty descending (high velocity first)
+      const ts = getSerperTierSize()
+      const serperAvailable = canUseSerper('images')
       const allItems = stock
-        .sort((a, b) => (b.avgDayQty ?? 0) - (a.avgDayQty ?? 0))
-        .map(s => ({ itemCode: s.itemCode, description: s.description, department: s.department, barcode: s.barcode }))
-      await prefetchImages(allItems, setPrefetchProgress, controller.signal)
+        .map(s => ({ ...s, _priority: computeImagePriority({ avgDayQty: s.avgDayQty, sellPrice: s.sellPrice, avgCost: s.avgCost }) }))
+        .sort((a, b) => b._priority - a._priority)
+        .map((s, i) => ({
+          itemCode: s.itemCode, description: s.description, department: s.department, barcode: s.barcode,
+          searchTier: (serperAvailable && i < ts ? 'serper' : 'ddg') as 'serper' | 'ddg',
+        }))
+      await prefetchImages(allItems, (p) => {
+        setPrefetchProgress(p)
+        // Refresh usage display during prefetch
+        setUsage(getSerperUsage())
+      }, controller.signal)
     } catch { /* aborted or error */ }
     setPrefetching(false)
+    setUsage(getSerperUsage())
   }
 
   async function handleClear() {
@@ -101,6 +143,10 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
       </div>
     )
   }
+
+  const totalUsed = usage.images + usage.shopping + usage.other
+  const budgetSum = budget.images + budget.shopping + budget.other
+  const budgetValid = budgetSum <= budget.monthlyLimit
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
@@ -156,15 +202,108 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
               type="text"
               value={serperApiKey}
               onChange={(e) => setSerperApiKey(e.target.value)}
-              placeholder="Serper API Key (fallback for manual picker)"
+              placeholder="Serper API Key"
               className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
             />
             <button onClick={saveSerper} className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg">Save</button>
           </div>
-          <p className="text-xs text-gray-400">Fallback for manual image picker (long-press image). 250 free queries/month.</p>
+
+          {/* ── Serper Budget & Usage ── */}
+          {serperApiKey.trim() && (
+            <div className="bg-gray-50 rounded-lg p-3 space-y-3 mt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-700">
+                  {new Date().toLocaleString('en-AU', { month: 'long', year: 'numeric' })} — Serper Usage
+                </span>
+                <span className="text-[10px] text-gray-400">{totalUsed} / {budget.monthlyLimit}</span>
+              </div>
+
+              <div className="space-y-1.5">
+                <div>
+                  <div className="flex justify-between text-[10px] text-gray-500">
+                    <span>Images</span><span>{usage.images} / {budget.images}</span>
+                  </div>
+                  <UsageBar used={usage.images} total={budget.images} color="bg-blue-500" />
+                </div>
+                <div>
+                  <div className="flex justify-between text-[10px] text-gray-500">
+                    <span>Shopping</span><span>{usage.shopping} / {budget.shopping}</span>
+                  </div>
+                  <UsageBar used={usage.shopping} total={budget.shopping} color="bg-purple-500" />
+                </div>
+                <div>
+                  <div className="flex justify-between text-[10px] text-gray-500">
+                    <span>Other</span><span>{usage.other} / {budget.other}</span>
+                  </div>
+                  <UsageBar used={usage.other} total={budget.other} color="bg-gray-400" />
+                </div>
+                <div className="pt-1 border-t border-gray-200">
+                  <div className="flex justify-between text-[10px] font-medium text-gray-600">
+                    <span>Total</span><span>{totalUsed} / {budget.monthlyLimit}</span>
+                  </div>
+                  <UsageBar used={totalUsed} total={budget.monthlyLimit} color="bg-emerald-500" />
+                </div>
+              </div>
+
+              {/* Budget allocation */}
+              <div className="space-y-1.5 pt-2 border-t border-gray-200">
+                <span className="text-[10px] font-semibold text-gray-600">Budget Allocation</span>
+                <div className="grid grid-cols-4 gap-1.5">
+                  <div>
+                    <label className="text-[9px] text-gray-400">Plan Limit</label>
+                    <input type="number" min={100} value={budget.monthlyLimit}
+                      onChange={e => saveBudget({ monthlyLimit: Number(e.target.value) || 5000 })}
+                      className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-gray-400">Images</label>
+                    <input type="number" min={0} value={budget.images}
+                      onChange={e => saveBudget({ images: Number(e.target.value) || 0 })}
+                      className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-gray-400">Shopping</label>
+                    <input type="number" min={0} value={budget.shopping}
+                      onChange={e => saveBudget({ shopping: Number(e.target.value) || 0 })}
+                      className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center" />
+                  </div>
+                  <div>
+                    <label className="text-[9px] text-gray-400">Other</label>
+                    <input type="number" min={0} value={budget.other}
+                      onChange={e => saveBudget({ other: Number(e.target.value) || 0 })}
+                      className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center" />
+                  </div>
+                </div>
+                {!budgetValid && (
+                  <p className="text-[10px] text-red-500 font-medium">
+                    Budget sum ({budgetSum}) exceeds plan limit ({budget.monthlyLimit})
+                  </p>
+                )}
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <label className="text-[9px] text-gray-400">Serper Tier (top products)</label>
+                    <input type="number" min={0} max={5000} value={tierSize}
+                      onChange={e => saveTierSize(Number(e.target.value) || 1000)}
+                      className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center" />
+                  </div>
+                  <button
+                    onClick={() => { resetSerperUsage(); setUsage(getSerperUsage()) }}
+                    className="mt-3 px-2 py-1 text-[10px] text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    Reset Usage
+                  </button>
+                </div>
+                <p className="text-[9px] text-gray-400">
+                  Top {tierSize} products by margin get Serper images. Rest use DDG (free).
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Manual search priority toggle */}
           {serperApiKey.trim() && (
             <div className="mt-2">
-              <label className="text-xs font-medium text-gray-600">Image Search Priority</label>
+              <label className="text-xs font-medium text-gray-600">Manual Search Priority</label>
               <div className="flex gap-1 mt-1">
                 <button
                   onClick={() => { setSearchPriority('ddg'); localStorage.setItem('grocery-manager-search-priority', 'ddg') }}
@@ -179,9 +318,10 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
                   Serper First (Paid)
                 </button>
               </div>
-              <p className="text-[10px] text-gray-400 mt-1">Switch to Serper First if you have a paid Serper plan for higher quality.</p>
+              <p className="text-[10px] text-gray-400 mt-1">For manual image picker and single-item refetch. Bulk prefetch uses two-tier system automatically.</p>
             </div>
           )}
+
           {isImageSearchConfigured() && (
             <div className="mt-2">
               <button

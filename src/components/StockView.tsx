@@ -11,6 +11,7 @@ import {
 import { useProductCodeLookup } from '../lib/useProductCodes'
 import { useProductExpiry, type ExpiryInfo } from '../lib/useProductExpiry'
 import { prefetchImages, type PrefetchProgress } from '../lib/images'
+import { computeImagePriority, getSerperTierSize, canUseSerper } from '../lib/serper'
 import BarcodeScanner from './BarcodeScanner'
 import BarcodeStripe from './BarcodeStripe'
 import ProductImage from './ProductImage'
@@ -474,9 +475,16 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     if (stockItems.length === 0 || imgStartedRef.current) return
     imgStartedRef.current = true
 
+    const tierSize = getSerperTierSize()
+    const serperAvailable = canUseSerper('images')
     const items = [...stockItems]
-      .sort((a, b) => (b.avgDayQty ?? 0) - (a.avgDayQty ?? 0))
-      .map(s => ({ itemCode: s.itemCode, description: s.description, department: s.department, barcode: s.barcode ?? undefined }))
+      .map(s => ({ ...s, _priority: computeImagePriority({ avgDayQty: s.avgDayQty, sellPrice: s.sellPrice, avgCost: s.avgCost }) }))
+      .sort((a, b) => b._priority - a._priority)
+      .map((s, i) => ({
+        itemCode: s.itemCode, description: s.description, department: s.department,
+        barcode: s.barcode ?? undefined,
+        searchTier: (serperAvailable && i < tierSize ? 'serper' : 'ddg') as 'serper' | 'ddg',
+      }))
 
     const controller = new AbortController()
     imgAbortRef.current = controller
