@@ -468,9 +468,12 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     return () => clearInterval(interval)
   }, [fetchData])
 
-  // ── Auto-prefetch images when stock loads ──
+  // ── Auto-prefetch images once when stock first loads ──
+  const imgStartedRef = useRef(false)
   useEffect(() => {
-    if (stockItems.length === 0 || !isImageSearchConfigured() || imgDone) return
+    if (stockItems.length === 0 || !isImageSearchConfigured() || imgStartedRef.current) return
+    imgStartedRef.current = true
+
     // Sort by velocity (high-selling items first) for image priority
     const items = [...stockItems]
       .sort((a, b) => (b.avgDayQty ?? 0) - (a.avgDayQty ?? 0))
@@ -478,13 +481,24 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
 
     const controller = new AbortController()
     imgAbortRef.current = controller
+    setImgDone(false)
 
-    prefetchImages(items, setImgProgress, controller.signal)
-      .then(() => { setImgDone(true); setTimeout(() => setImgProgress(null), 3000) })
+    prefetchImages(items, (p) => {
+      setImgProgress(p)
+      // If credits exhausted, keep banner visible (no auto-hide)
+      if (p.creditsExhausted) setImgDone(true)
+    }, controller.signal)
+      .then(() => {
+        setImgDone(true)
+        // Auto-hide after 5s unless credits exhausted (keep that warning visible)
+        setTimeout(() => {
+          setImgProgress(prev => prev?.creditsExhausted ? prev : null)
+        }, 5000)
+      })
       .catch(() => {})
 
     return () => { controller.abort() }
-  }, [stockItems.length > 0]) // only trigger once when stock first loads
+  }, [stockItems.length]) // trigger once when stock count goes from 0 → N
 
   // ── Build lookup maps ──
   const promoMap = useMemo(() => {
@@ -637,34 +651,42 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       </div>
 
       {/* ── Image prefetch banner ── */}
-      {imgProgress && (
-        <div className="flex items-center gap-2 px-4 py-1.5 bg-blue-50 border-b border-blue-100 shrink-0">
-          <ImageIcon size={12} className="text-blue-600 shrink-0" />
+      {imgProgress && (imgProgress.total > 0 || imgProgress.creditsExhausted) && (
+        <div className={`flex items-center gap-2 px-4 py-1.5 border-b shrink-0 ${
+          imgProgress.creditsExhausted ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-100'
+        }`}>
+          <ImageIcon size={12} className={imgProgress.creditsExhausted ? 'text-amber-600 shrink-0' : 'text-blue-600 shrink-0'} />
           <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between text-xs text-blue-700 mb-0.5">
+            <div className={`flex items-center justify-between text-xs ${
+              imgProgress.creditsExhausted ? 'text-amber-700' : 'text-blue-700'
+            }`}>
               <span className="truncate">
-                {imgDone
-                  ? `Done — ${imgProgress.found} images saved`
-                  : `Fetching images: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`}
+                {imgProgress.creditsExhausted
+                  ? `Serper credits depleted — ${imgProgress.total - imgProgress.done} products still need images. Top up or change API key.`
+                  : imgDone
+                    ? `Done — ${imgProgress.found} new images saved${imgProgress.skipped ? `, ${imgProgress.skipped} already cached` : ''}`
+                    : `Fetching images: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`}
               </span>
-              <span className="shrink-0 ml-2">{Math.round((imgProgress.done / Math.max(1, imgProgress.total)) * 100)}%</span>
+              {!imgProgress.creditsExhausted && !imgDone && (
+                <span className="shrink-0 ml-2">{Math.round((imgProgress.done / Math.max(1, imgProgress.total)) * 100)}%</span>
+              )}
             </div>
-            <div className="h-1 bg-blue-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                style={{ width: `${(imgProgress.done / Math.max(1, imgProgress.total)) * 100}%` }}
-              />
-            </div>
+            {!imgProgress.creditsExhausted && !imgDone && (
+              <div className="h-1 mt-0.5 bg-blue-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                  style={{ width: `${(imgProgress.done / Math.max(1, imgProgress.total)) * 100}%` }}
+                />
+              </div>
+            )}
           </div>
-          {!imgDone && (
-            <button
-              onClick={() => { imgAbortRef.current?.abort(); setImgProgress(null) }}
-              className="text-blue-400 hover:text-blue-600 shrink-0 p-0.5"
-              aria-label="Stop image fetch"
-            >
-              <X size={14} />
-            </button>
-          )}
+          <button
+            onClick={() => { imgAbortRef.current?.abort(); setImgProgress(null) }}
+            className={`shrink-0 p-0.5 ${imgProgress.creditsExhausted ? 'text-amber-400 hover:text-amber-600' : 'text-blue-400 hover:text-blue-600'}`}
+            aria-label="Dismiss"
+          >
+            <X size={14} />
+          </button>
         </div>
       )}
 

@@ -111,33 +111,60 @@ export async function fetchAndCacheImage(
   return imageUrl
 }
 
-export interface PrefetchProgress { total: number; done: number; found: number; errors: number; current: string }
+export interface PrefetchProgress {
+  total: number        // items that need fetching (not cached)
+  done: number         // items processed so far
+  found: number        // images successfully found
+  errors: number       // API errors (credits depleted, etc.)
+  skipped: number      // already cached (shown briefly then hidden)
+  current: string      // current product description
+  creditsExhausted?: boolean // true when API credits are depleted
+}
 
 export async function prefetchImages(
   items: { itemCode: string; description: string; department: string; barcode?: string | null }[],
   onProgress?: (p: PrefetchProgress) => void,
   signal?: AbortSignal,
 ): Promise<{ fetched: number; found: number }> {
-  let done = 0, found = 0, errors = 0
+  // First pass: filter out already-cached items
+  const uncached: typeof items = []
+  let skipped = 0
   for (const item of items) {
     if (signal?.aborted) break
     const existing = await db.imageCache.get(item.itemCode)
-    if (existing) {
-      done++
-      if (existing.imageUrl) found++
-      onProgress?.({ total: items.length, done, found, errors, current: item.description })
-      continue
-    }
+    if (existing) { skipped++; continue }
+    uncached.push(item)
+  }
+
+  // Nothing to fetch
+  if (uncached.length === 0) {
+    onProgress?.({ total: 0, done: 0, found: 0, errors: 0, skipped, current: '', creditsExhausted: false })
+    return { fetched: 0, found: 0 }
+  }
+
+  let done = 0, found = 0, errors = 0, consecutiveErrors = 0
+  onProgress?.({ total: uncached.length, done, found, errors, skipped, current: uncached[0]?.description ?? '' })
+
+  for (const item of uncached) {
+    if (signal?.aborted) break
     const url = await fetchAndCacheImage(item.itemCode, item.description, item.department, item.barcode)
     done++
-    if (url) found++
-    else {
+    if (url) {
+      found++
+      consecutiveErrors = 0
+    } else {
       const entry = await db.imageCache.get(item.itemCode)
-      if (!entry) errors++ // API error (not cached) vs genuinely no image (cached as '')
+      if (!entry) {
+        errors++
+        consecutiveErrors++
+      } else {
+        consecutiveErrors = 0 // genuinely no image, not an API error
+      }
     }
-    onProgress?.({ total: items.length, done, found, errors, current: item.description })
-    // Stop early if API keeps failing (e.g. out of credits) — 5 consecutive errors
-    if (errors >= 5 && found === 0) break
+
+    const exhausted = consecutiveErrors >= 5
+    onProgress?.({ total: uncached.length, done, found, errors, skipped, current: item.description, creditsExhausted: exhausted })
+    if (exhausted) break
     await new Promise(r => setTimeout(r, 1100))
   }
   return { fetched: done, found }
