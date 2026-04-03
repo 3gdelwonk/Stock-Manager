@@ -345,6 +345,7 @@ export async function searchProductImages(
 export async function saveSelectedImage(itemCode: string, imageUrl: string): Promise<void> {
   await db.imageCache.put({ itemCode, imageUrl, fetchedAt: new Date() })
   pushImageToJarvis(itemCode, imageUrl)
+  window.dispatchEvent(new CustomEvent('image-cached', { detail: { itemCode, imageUrl } }))
 }
 
 export { cleanDescription, buildSearchQuery }
