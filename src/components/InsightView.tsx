@@ -160,10 +160,10 @@ export default function InsightView() {
         getTopSellers(30, 10),
       ])
 
-      if (trendsResult.status === 'fulfilled') setTrends(trendsResult.value.entries)
-      if (hourlyResult.status === 'fulfilled') setHourlyData(hourlyResult.value.hours)
-      if (top7Result.status === 'fulfilled') setTopSellers7d(top7Result.value)
-      if (top30Result.status === 'fulfilled') setTopSellers30d(top30Result.value)
+      if (trendsResult.status === 'fulfilled') setTrends(trendsResult.value?.entries ?? [])
+      if (hourlyResult.status === 'fulfilled') setHourlyData(hourlyResult.value?.hours ?? [])
+      if (top7Result.status === 'fulfilled') setTopSellers7d(top7Result.value ?? [])
+      if (top30Result.status === 'fulfilled') setTopSellers30d(top30Result.value ?? [])
     } catch (err) {
       setError((err as Error).message || 'Failed to load insights')
     } finally {
@@ -333,7 +333,7 @@ export default function InsightView() {
     for (const seller of top5) {
       try {
         const data = await getOnlinePrices(seller.description)
-        const priceResults = data.results
+        const priceResults = data?.results ?? []
         const best = priceResults.length > 0
           ? priceResults.reduce((min, r) => r.price < min.price ? r : min, priceResults[0])
           : null

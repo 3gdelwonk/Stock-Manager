@@ -1,11 +1,10 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { LayoutDashboard, Warehouse, Clock, Tag, BarChart2, Lightbulb, Settings, Plus } from 'lucide-react'
+import { LayoutDashboard, Warehouse, Clock, BarChart2, Lightbulb, Settings, Plus } from 'lucide-react'
 import Dashboard from './components/Dashboard'
-import LiveStockView from './components/LiveStockView'
+import StockView from './components/StockView'
 import ExpiryView from './components/ExpiryView'
-import PromotionsView from './components/PromotionsView'
 import PerformanceView from './components/PerformanceView'
 import InsightView from './components/InsightView'
 import SettingsSheet from './components/SettingsSheet'
@@ -57,13 +56,12 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'dashboard' | 'stock' | 'expiry' | 'promos' | 'insights' | 'track'
+type Tab = 'dashboard' | 'stock' | 'expiry' | 'insights' | 'track'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Home',     icon: <LayoutDashboard size={16} /> },
   { id: 'stock',     label: 'Stock',    icon: <Warehouse size={16} /> },
   { id: 'expiry',    label: 'Expiry',   icon: <Clock size={16} /> },
-  { id: 'promos',    label: 'Promos',   icon: <Tag size={16} /> },
   { id: 'insights',  label: 'Insights', icon: <Lightbulb size={16} /> },
   { id: 'track',     label: 'Track',    icon: <BarChart2 size={16} /> },
 ]
@@ -72,7 +70,6 @@ const TAB_TITLES: Record<Tab, string> = {
   dashboard: 'Dashboard',
   stock:     'Stock',
   expiry:    'Expiry Management',
-  promos:    'Promotions',
   insights:  'AI Insights',
   track:     'Track',
 }
@@ -83,7 +80,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const saved = localStorage.getItem(LAST_TAB_KEY) as Tab | null
     // Migrate old tab names
-    if (saved === 'products' as string) return 'stock'
+    if (saved === 'products' as string || saved === 'promos' as string) return 'stock'
     if (saved === 'performance' as string) return 'track'
     return saved && TABS.some(t => t.id === saved) ? saved : 'dashboard'
   })
@@ -113,9 +110,8 @@ export default function App() {
   const renderTab = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard onNavigate={handleNavigate} />
-      case 'stock':     return <LiveStockView initialAction={stockAction} onActionConsumed={() => setStockAction(null)} />
+      case 'stock':     return <StockView initialAction={stockAction} onActionConsumed={() => setStockAction(null)} />
       case 'expiry':    return <ExpiryView />
-      case 'promos':    return <PromotionsView />
       case 'insights':  return <InsightView />
       case 'track':     return <PerformanceView />
     }
@@ -175,10 +171,8 @@ export default function App() {
         onClose={() => setSmartScannerOpen(false)}
         onProductFound={(product) => {
           setSmartScannerOpen(false)
-          // Navigate to stock tab with the product's barcode as search
           setStockAction('search')
           handleTabChange('stock')
-          // Small delay to let the tab mount, then set search via action
           setTimeout(() => {
             const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')
             if (input) { input.value = product.barcode || product.name; input.dispatchEvent(new Event('input', { bubbles: true })) }
