@@ -207,6 +207,21 @@ function StockCard({
       {/* ── Expanded detail ── */}
       {expanded && (
         <div className="space-y-3 pt-2 border-t border-gray-100">
+          {/* Larger product image — long-press to change */}
+          <div className="flex justify-center">
+            <div className="relative">
+              <ProductImage
+                itemCode={stock.itemCode}
+                description={stock.description}
+                department={stock.department}
+                barcode={stock.barcode}
+                size={120}
+                className="rounded-xl shadow-sm"
+              />
+              <p className="text-[9px] text-gray-400 text-center mt-1">Hold image to change</p>
+            </div>
+          </div>
+
           {/* Codes + barcode */}
           <div className="bg-gray-50 rounded-lg px-3 py-2 space-y-2">
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
@@ -500,8 +515,11 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
   // ── Barcode scan ──
   const handleBarcodeScan = useCallback((code: string) => {
     setScannerOpen(false)
+    // Try resolving via local product codes, fall back to raw scanned code
     const resolved = productCodes.resolveCode(code)
-    setSearch(resolved)
+    // Use the normalized barcode (strip non-numeric) for matching against API stock data
+    const normalized = code.trim().replace(/[^0-9]/g, '')
+    setSearch(resolved !== code ? resolved : normalized || code)
     setDeptFilter('All')
   }, [productCodes])
 

@@ -48,14 +48,21 @@ export default function SmartScanner({
 
   const handleBarcodeDecode = useCallback(async (code: string) => {
     setStatus({ kind: 'loading', message: 'Looking up product...' })
+    const normalized = code.trim().replace(/[^0-9]/g, '')
 
     try {
-      // 1. Search local Dexie by barcode
+      // 1. Search local Dexie by barcode (exact then normalized)
       let product = await db.products.where('barcode').equals(code).first()
+      if (!product && normalized !== code) {
+        product = await db.products.where('barcode').equals(normalized).first()
+      }
 
       // 2. Try itemCode if barcode not found
       if (!product) {
         product = await db.products.where('itemCode').equals(code).first()
+        if (!product && normalized !== code) {
+          product = await db.products.where('itemCode').equals(normalized).first()
+        }
       }
 
       // 3. Found locally

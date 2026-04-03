@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ScanBarcode, Search, Plus, X } from 'lucide-react'
 import { db } from '../lib/db'
 import { addExpiryBatch } from '../lib/expiry'
+import { searchItems } from '../lib/jarvis'
 import BarcodeScanner from './BarcodeScanner'
 import { DEPARTMENT_ORDER, DEPARTMENT_LABELS } from '../lib/constants'
 
@@ -42,13 +43,45 @@ export default function AddBatchSheet({ open, onClose, initialBarcode, initialPr
     const trimmed = barcode.trim()
     if (!trimmed) return
     setBarcodeInput(trimmed)
-    const product = await db.products.where('barcode').equals(trimmed).first()
+    // Normalize: strip non-numeric for matching
+    const normalized = trimmed.replace(/[^0-9]/g, '')
+
+    // 1. Try local Dexie DB (exact match, then normalized)
+    let product = await db.products.where('barcode').equals(trimmed).first()
+    if (!product && normalized !== trimmed) {
+      product = await db.products.where('barcode').equals(normalized).first()
+    }
+    // Also try by itemCode (order code)
+    if (!product) {
+      product = await db.products.where('itemCode').equals(trimmed).first()
+      if (!product && normalized !== trimmed) {
+        product = await db.products.where('itemCode').equals(normalized).first()
+      }
+    }
+
     if (product) {
       setProductName(product.name)
       setDepartment(product.department)
       const locParts = [product.aisle, product.bay, product.shelf].filter(Boolean)
       setLocation(locParts.join(' / '))
+      setLookupDone(true)
+      return
     }
+
+    // 2. Fallback: search JARVISmart API
+    try {
+      const result = await searchItems(trimmed, 1)
+      if (result.items && result.items.length > 0) {
+        const item = result.items[0]
+        setProductName(item.description)
+        // JARVISmart returns department name directly
+        setDepartment(item.department)
+        setBarcodeInput(item.barcode || trimmed)
+        setLookupDone(true)
+        return
+      }
+    } catch { /* API unavailable, fall through */ }
+
     setLookupDone(true)
   }, [])
 
