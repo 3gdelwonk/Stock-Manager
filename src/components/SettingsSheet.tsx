@@ -17,6 +17,9 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [serperApiKey, setSerperApiKey] = useState(
     () => localStorage.getItem('grocery-manager-serper-api-key') ?? (import.meta.env.VITE_SERPER_API_KEY as string) ?? ''
   )
+  const [ddgWorkerUrl, setDdgWorkerUrl] = useState(
+    () => localStorage.getItem('grocery-manager-ddg-worker-url') ?? ''
+  )
   const [expiryRed, setExpiryRed] = useState(() => {
     return parseInt(localStorage.getItem('grocery-manager-expiry-red') ?? '3', 10)
   })
@@ -52,6 +55,14 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
     }
   }
 
+  function saveDdgWorker() {
+    if (ddgWorkerUrl.trim()) {
+      localStorage.setItem('grocery-manager-ddg-worker-url', ddgWorkerUrl.trim())
+    } else {
+      localStorage.removeItem('grocery-manager-ddg-worker-url')
+    }
+  }
+
   function saveExpiryRed() {
     localStorage.setItem('grocery-manager-expiry-red', String(expiryRed))
   }
@@ -70,7 +81,7 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
     const controller = new AbortController()
     abortRef.current = controller
     try {
-      const stock = await getStockLevels({ limit: 5000 })
+      const stock = await getStockLevels({ limit: 50000 })
       // Fetch ALL stock (not department-filtered), sort by avg daily qty descending (high velocity first)
       const allItems = stock
         .sort((a, b) => (b.avgDayQty ?? 0) - (a.avgDayQty ?? 0))
@@ -145,18 +156,31 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700">Serper.dev API Key</label>
+          <label className="text-sm font-medium text-gray-700">DDG Image Worker URL</label>
+          <div className="flex gap-2">
+            <input
+              type="url"
+              value={ddgWorkerUrl}
+              onChange={(e) => setDdgWorkerUrl(e.target.value)}
+              placeholder="https://ddg-image-proxy.YOUR.workers.dev"
+              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
+            />
+            <button onClick={saveDdgWorker} className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg">Save</button>
+          </div>
+          <p className="text-xs text-gray-400">Free unlimited image search via Cloudflare Worker. Primary source for bulk fetch.</p>
+
+          <label className="text-sm font-medium text-gray-700 mt-3 block">Serper.dev API Key</label>
           <div className="flex gap-2">
             <input
               type="text"
               value={serperApiKey}
               onChange={(e) => setSerperApiKey(e.target.value)}
-              placeholder="Serper API Key (optional — default included)"
+              placeholder="Serper API Key (fallback for manual picker)"
               className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
             />
             <button onClick={saveSerper} className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg">Save</button>
           </div>
-          <p className="text-xs text-gray-400">For product images via Google Images. Default key included (2,500 free queries).</p>
+          <p className="text-xs text-gray-400">Fallback for manual image picker (long-press image). 250 free queries/month.</p>
           {isImageSearchConfigured() && (
             <div className="mt-2">
               <button
