@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   RefreshCw, WifiOff, Search, ScanBarcode, X, ChevronDown, ChevronUp,
   TrendingUp, TrendingDown, Tag, AlertTriangle, Clock, DollarSign,
-  Printer, PackageMinus, BarChart3, Warehouse,
+  Printer, PackageMinus, BarChart3, Warehouse, ImageIcon,
 } from 'lucide-react'
 import {
   checkConnection, getStockLevels, getPromotions, getTopSellers,
@@ -10,7 +10,7 @@ import {
 } from '../lib/jarvis'
 import { useProductCodeLookup } from '../lib/useProductCodes'
 import { useProductExpiry, type ExpiryInfo } from '../lib/useProductExpiry'
-// import { useTrackedItemCodes } from '../lib/useTrackedItems'
+import { prefetchImages, isImageSearchConfigured, type PrefetchProgress } from '../lib/images'
 import BarcodeScanner from './BarcodeScanner'
 import BarcodeStripe from './BarcodeStripe'
 import ProductImage from './ProductImage'
@@ -402,6 +402,11 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
   const [sortKey, setSortKey] = useState<SortKey>('revenue')
   const [scannerOpen, setScannerOpen] = useState(false)
 
+  // ── Image auto-prefetch ──
+  const [imgProgress, setImgProgress] = useState<PrefetchProgress | null>(null)
+  const [imgDone, setImgDone] = useState(false)
+  const imgAbortRef = useRef<AbortController | null>(null)
+
   // ── Modals ──
   const [priceTarget, setPriceTarget] = useState<StockItem | null>(null)
   const [compareTarget, setCompareTarget] = useState<StockItem | null>(null)
@@ -463,6 +468,24 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     return () => clearInterval(interval)
   }, [fetchData])
 
+  // ── Auto-prefetch images when stock loads ──
+  useEffect(() => {
+    if (stockItems.length === 0 || !isImageSearchConfigured() || imgDone) return
+    // Sort by velocity (high-selling items first) for image priority
+    const items = [...stockItems]
+      .sort((a, b) => (b.avgDayQty ?? 0) - (a.avgDayQty ?? 0))
+      .map(s => ({ itemCode: s.itemCode, description: s.description, department: s.department, barcode: s.barcode ?? undefined }))
+
+    const controller = new AbortController()
+    imgAbortRef.current = controller
+
+    prefetchImages(items, setImgProgress, controller.signal)
+      .then(() => { setImgDone(true); setTimeout(() => setImgProgress(null), 3000) })
+      .catch(() => {})
+
+    return () => { controller.abort() }
+  }, [stockItems.length > 0]) // only trigger once when stock first loads
+
   // ── Build lookup maps ──
   const promoMap = useMemo(() => {
     const map = new Map<string, LivePromotion>()
@@ -496,21 +519,6 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     for (const t of topSellers) map.set(t.itemCode, t.revenue)
     return map
   }, [topSellers])
-
-  // ── Log 5 sample order codes for verification ──
-  useEffect(() => {
-    if (productCodes.ready && stockItems.length > 0) {
-      const samples: { barcode: string | null; orderCode: string | null; description: string }[] = []
-      for (const s of stockItems) {
-        if (samples.length >= 5) break
-        const oc = productCodes.getOrderCode(s.barcode)
-        if (oc) samples.push({ barcode: s.barcode, orderCode: oc, description: s.description })
-      }
-      if (samples.length > 0) {
-        console.log('[StockView] Sample order codes:', samples)
-      }
-    }
-  }, [productCodes, stockItems])
 
   // ── Barcode scan ──
   const handleBarcodeScan = useCallback((code: string) => {
@@ -627,6 +635,38 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
           <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
         </button>
       </div>
+
+      {/* ── Image prefetch banner ── */}
+      {imgProgress && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-blue-50 border-b border-blue-100 shrink-0">
+          <ImageIcon size={12} className="text-blue-600 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between text-xs text-blue-700 mb-0.5">
+              <span className="truncate">
+                {imgDone
+                  ? `Done — ${imgProgress.found} images saved`
+                  : `Fetching images: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`}
+              </span>
+              <span className="shrink-0 ml-2">{Math.round((imgProgress.done / Math.max(1, imgProgress.total)) * 100)}%</span>
+            </div>
+            <div className="h-1 bg-blue-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                style={{ width: `${(imgProgress.done / Math.max(1, imgProgress.total)) * 100}%` }}
+              />
+            </div>
+          </div>
+          {!imgDone && (
+            <button
+              onClick={() => { imgAbortRef.current?.abort(); setImgProgress(null) }}
+              className="text-blue-400 hover:text-blue-600 shrink-0 p-0.5"
+              aria-label="Stop image fetch"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
 
       {/* ── Error banner ── */}
       {error && (
