@@ -46,7 +46,7 @@ function cleanDescription(desc: string): string {
 function buildSearchQuery(description: string, _department: string, barcode?: string | null): string {
   if (barcode) return `${barcode} product`
   const cleaned = cleanDescription(description)
-  return `${cleaned} product grocery`
+  return `${cleaned} product`
 }
 
 function getSerperApiKey(): string {
@@ -98,11 +98,13 @@ export async function fetchAndCacheImage(
     return jarvisUrl
   }
 
-  let imageUrl = await serperImageSearch(buildSearchQuery(description, department, barcode))
+  // Search by description first (much better for Google Images), barcode as fallback
+  let imageUrl = await serperImageSearch(buildSearchQuery(description, department))
+  if (imageUrl === 'error') return null // API failure — don't cache, allow retry later
   if (imageUrl === null && barcode) {
-    imageUrl = await serperImageSearch(buildSearchQuery(description, department))
+    imageUrl = await serperImageSearch(buildSearchQuery(description, department, barcode))
+    if (imageUrl === 'error') return null
   }
-  if (imageUrl === 'error') return null
 
   await db.imageCache.put({ itemCode, imageUrl: imageUrl ?? '', fetchedAt: new Date() })
   if (imageUrl) pushImageToJarvis(itemCode, imageUrl)
@@ -131,9 +133,11 @@ export async function prefetchImages(
     if (url) found++
     else {
       const entry = await db.imageCache.get(item.itemCode)
-      if (!entry) errors++
+      if (!entry) errors++ // API error (not cached) vs genuinely no image (cached as '')
     }
     onProgress?.({ total: items.length, done, found, errors, current: item.description })
+    // Stop early if API keeps failing (e.g. out of credits) — 5 consecutive errors
+    if (errors >= 5 && found === 0) break
     await new Promise(r => setTimeout(r, 1100))
   }
   return { fetched: done, found }
