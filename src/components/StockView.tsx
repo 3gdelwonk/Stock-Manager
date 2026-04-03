@@ -6,9 +6,9 @@ import {
 } from 'lucide-react'
 import {
   checkConnection, getStockLevels, getPromotions, getTopSellers,
-  adjustStock, printLabel, type StockItem, type LivePromotion, type TopSeller,
+  adjustStock, printLabel, getOrderInfo,
+  type StockItem, type LivePromotion, type TopSeller, type OrderInfo,
 } from '../lib/jarvis'
-import { useProductCodeLookup } from '../lib/useProductCodes'
 import { useProductExpiry, type ExpiryInfo } from '../lib/useProductExpiry'
 import { prefetchImages, type PrefetchProgress } from '../lib/images'
 import { computeImagePriority } from '../lib/serper'
@@ -64,7 +64,6 @@ interface EnrichedStockItem {
   margin: number
   revenue: number
   expiryInfo: ExpiryInfo | null
-  orderCode: string | null
 }
 
 // ── Stock Card ────────────────────────────────────────────────────────────────
@@ -80,14 +79,32 @@ function StockCard({
   onCompare: (item: StockItem) => void
   onAddExpiry: (item: StockItem) => void
 }) {
-  const { stock, promo, topSeller, slowMover, margin, expiryInfo, orderCode } = item
+  const { stock, promo, topSeller, slowMover, margin, expiryInfo } = item
   const [expanded, setExpanded] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
+  const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null)
+  const [orderLoading, setOrderLoading] = useState(false)
+  const orderFetched = useRef(false)
 
   const lowStock = stock.onHand > 0 && stock.onHand <= stock.reorderLevel
   const outOfStock = stock.onHand <= 0
   const velocity = stock.avgDayQty ?? 0
   const daysOfStock = velocity > 0 ? stock.onHand / velocity : null
+
+  function handleExpand() {
+    const next = !expanded
+    setExpanded(next)
+    if (next && !orderFetched.current) {
+      orderFetched.current = true
+      setOrderLoading(true)
+      getOrderInfo(stock.itemCode).then(info => {
+        setOrderInfo(info)
+        setOrderLoading(false)
+      })
+    }
+  }
+
+  const primarySupplier = orderInfo?.suppliers?.find(s => s.isPrimary) ?? orderInfo?.suppliers?.[0] ?? null
 
   async function handleAdjustStock() {
     const input = prompt('Adjust stock quantity (negative to reduce):')
@@ -112,7 +129,7 @@ function StockCard({
   return (
     <div className={`bg-white rounded-xl border ${promo ? 'border-amber-300 ring-1 ring-amber-100' : outOfStock ? 'border-red-200' : 'border-gray-200'} p-3 space-y-2`}>
       {/* ── Collapsed view ── */}
-      <button className="w-full text-left" onClick={() => setExpanded(e => !e)}>
+      <button className="w-full text-left" onClick={handleExpand}>
         {/* Header: image + name + dept */}
         <div className="flex items-start gap-2.5">
           <ProductImage
@@ -223,12 +240,12 @@ function StockCard({
             </div>
           </div>
 
-          {/* Codes + barcode */}
+          {/* Codes + barcode + supplier */}
           <div className="bg-gray-50 rounded-lg px-3 py-2 space-y-2">
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
               <div><span className="text-gray-400">Item Code:</span> <span className="font-mono font-medium">{stock.itemCode}</span></div>
-              {orderCode && (
-                <div><span className="text-gray-400">Order Code:</span> <span className="font-mono font-medium">{orderCode}</span></div>
+              {primarySupplier?.orderCode && (
+                <div><span className="text-gray-400">Order Code:</span> <span className="font-mono font-medium">{primarySupplier.orderCode}</span></div>
               )}
               {stock.barcode && (
                 <div><span className="text-gray-400">Barcode:</span> <span className="font-mono font-medium">{stock.barcode}</span></div>
@@ -238,6 +255,29 @@ function StockCard({
             {stock.barcode && (
               <div className="flex justify-center">
                 <BarcodeStripe value={stock.barcode} height={40} showText />
+              </div>
+            )}
+            {/* Supplier info */}
+            {orderLoading && (
+              <p className="text-[10px] text-gray-400 animate-pulse">Loading supplier info...</p>
+            )}
+            {orderInfo && orderInfo.suppliers.length > 0 && (
+              <div className="space-y-1.5 pt-1 border-t border-gray-200">
+                {orderInfo.suppliers.map((sup, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`font-medium truncate ${sup.isPrimary ? 'text-gray-900' : 'text-gray-500'}`}>
+                        {sup.supplierName}
+                      </span>
+                      {sup.isPrimary && <span className="text-[8px] px-1 py-0.5 bg-emerald-100 text-emerald-700 rounded font-semibold shrink-0">PRIMARY</span>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 text-gray-500">
+                      <span>${sup.unitCost.toFixed(2)}/ea</span>
+                      <span className="text-gray-300">|</span>
+                      <span>${sup.ctnCost.toFixed(2)}/{sup.ctnQty}pk</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -403,6 +443,11 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
   const [sortKey, setSortKey] = useState<SortKey>('revenue')
   const [scannerOpen, setScannerOpen] = useState(false)
 
+  // Order code search: when search looks like an order code and no local match,
+  // try server-side lookup to resolve to an itemCode
+  const [orderCodeItemCode, setOrderCodeItemCode] = useState<string | null>(null)
+  const orderCodeSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // ── Image auto-prefetch ──
   const [imgProgress, setImgProgress] = useState<PrefetchProgress | null>(null)
   const [imgDone, setImgDone] = useState(false)
@@ -414,7 +459,6 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
   const [expiryTarget, setExpiryTarget] = useState<StockItem | null>(null)
 
   // ── Hooks for enrichment ──
-  const productCodes = useProductCodeLookup()
   const expiryMap = useProductExpiry()
 
   // ── Initial action from dashboard ──
@@ -539,16 +583,30 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     return map
   }, [topSellers])
 
+  // ── Barcode lookup from live stock data (no CSV import needed) ──
+  const stockLookup = useMemo(() => {
+    const byBarcode = new Map<string, StockItem>()
+    const byItemCode = new Map<string, StockItem>()
+    for (const s of stockItems) {
+      if (s.barcode) byBarcode.set(s.barcode, s)
+      byItemCode.set(s.itemCode.toLowerCase(), s)
+    }
+    return { byBarcode, byItemCode }
+  }, [stockItems])
+
   // ── Barcode scan ──
   const handleBarcodeScan = useCallback((code: string) => {
     setScannerOpen(false)
-    // Try resolving via local product codes, fall back to raw scanned code
-    const resolved = productCodes.resolveCode(code)
-    // Use the normalized barcode (strip non-numeric) for matching against API stock data
-    const normalized = code.trim().replace(/[^0-9]/g, '')
-    setSearch(resolved !== code ? resolved : normalized || code)
+    const trimmed = code.trim()
+    const normalized = trimmed.replace(/[^0-9]/g, '')
+    // Match against live stock data from JARVISmart
+    const match = stockLookup.byBarcode.get(trimmed)
+      || stockLookup.byBarcode.get(normalized)
+      || stockLookup.byItemCode.get(trimmed.toLowerCase())
+      || stockLookup.byItemCode.get(normalized.toLowerCase())
+    setSearch(match ? (match.barcode || match.itemCode) : (normalized || trimmed))
     setDeptFilter('All')
-  }, [productCodes])
+  }, [stockLookup])
 
   // ── Enrich stock items ──
   const enrichedItems = useMemo((): EnrichedStockItem[] => {
@@ -562,10 +620,9 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
         margin,
         revenue: revenueMap.get(stock.itemCode) ?? 0,
         expiryInfo: stock.barcode ? (expiryMap.get(stock.barcode) ?? null) : null,
-        orderCode: productCodes.getOrderCode(stock.barcode),
       }
     })
-  }, [stockItems, promoMap, topSellerCodes, slowMoverCodes, revenueMap, expiryMap, productCodes])
+  }, [stockItems, promoMap, topSellerCodes, slowMoverCodes, revenueMap, expiryMap])
 
   // ── Department list ──
   const departments = useMemo(() => {
@@ -573,6 +630,38 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     for (const item of enrichedItems) depts.add(item.stock.department)
     return ['All', ...Array.from(depts).sort()]
   }, [enrichedItems])
+
+  // ── Order code server lookup (debounced) ──
+  // When search looks numeric and doesn't match any local barcode/itemCode,
+  // try resolving it as a Metcash order code via the API
+  useEffect(() => {
+    if (orderCodeSearchRef.current) clearTimeout(orderCodeSearchRef.current)
+    setOrderCodeItemCode(null)
+    const q = search.trim()
+    // Only trigger for 4-8 digit numeric codes that don't match locally
+    if (!/^\d{4,8}$/.test(q) || stockItems.length === 0) return
+    const hasLocalMatch = stockItems.some(s =>
+      s.barcode === q || s.itemCode.toLowerCase() === q.toLowerCase() ||
+      s.description.toLowerCase().includes(q.toLowerCase())
+    )
+    if (hasLocalMatch) return
+    // Debounce 500ms then search all items for this order code
+    orderCodeSearchRef.current = setTimeout(async () => {
+      // Try each stock item — but that's too many. Instead, search via description hint.
+      // The order-info endpoint needs an itemCode, so we need a reverse lookup.
+      // For now, try the top 50 items by revenue to see if any match.
+      // TODO: Add a server-side /api/pos/order-code-lookup/:code endpoint for efficiency
+      for (const item of stockItems.slice(0, 200)) {
+        const info = await getOrderInfo(item.itemCode)
+        if (info?.suppliers?.some(s => s.orderCode === q || s.orderCodeRaw?.includes(q))) {
+          setOrderCodeItemCode(item.itemCode)
+          return
+        }
+      }
+    }, 500)
+    return () => { if (orderCodeSearchRef.current) clearTimeout(orderCodeSearchRef.current) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, stockItems.length > 0])
 
   // ── Filter + sort ──
   const filteredItems = useMemo(() => {
@@ -584,14 +673,15 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       filtered = filtered.filter(e => e.stock.department === deptFilter)
     }
 
-    // Search (supports name, barcode, POS item code, and 8-digit order code)
+    // Search (supports name, barcode, POS item code)
     if (q) {
       filtered = filtered.filter(e => {
         const s = e.stock
+        // If order code resolved via API, match that itemCode
+        if (orderCodeItemCode && s.itemCode === orderCodeItemCode) return true
         return s.description.toLowerCase().includes(q) ||
           s.itemCode.toLowerCase().includes(q) ||
-          (s.barcode && s.barcode.includes(search)) ||
-          (e.orderCode && e.orderCode.toLowerCase().includes(q))
+          (s.barcode && s.barcode.includes(search))
       })
     }
 
@@ -605,7 +695,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       }
     })
     return sorted
-  }, [enrichedItems, search, deptFilter, sortKey])
+  }, [enrichedItems, search, deptFilter, sortKey, orderCodeItemCode])
 
   // ── Loading ──
   if (loading && stockItems.length === 0) {

@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { RefreshCw, WifiOff, Tag, Search, ScanBarcode, X, AlertTriangle, Calendar } from 'lucide-react'
 import { checkConnection, getPromotions, getStockLevels, type LivePromotion } from '../lib/jarvis'
 import { useTrackedItemCodes } from '../lib/useTrackedItems'
-import { useProductCodeLookup } from '../lib/useProductCodes'
 import BarcodeScanner from './BarcodeScanner'
 import BarcodeStripe from './BarcodeStripe'
 import ProductImage from './ProductImage'
@@ -185,7 +184,7 @@ export default function PromotionsView() {
   const [expiringSoonCount, setExpiringSoonCount] = useState(0)
 
   const trackedCodes = useTrackedItemCodes()
-  const productCodes = useProductCodeLookup()
+
 
   // ── Fetch data ────────────────────────────────────────────────────────────
 
@@ -234,14 +233,28 @@ export default function PromotionsView() {
 
   // ── Barcode scan handler ──────────────────────────────────────────────────
 
+  // Reverse lookup: barcode → itemCode from stock data
+  const reverseBarcodeMap = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const [itemCode, barcode] of barcodeMap) {
+      map.set(barcode, itemCode)
+    }
+    return map
+  }, [barcodeMap])
+
   const handleBarcodeScan = useCallback(
     (code: string) => {
       setScannerOpen(false)
-      const resolved = productCodes.resolveCode(code)
+      const trimmed = code.trim()
+      const normalized = trimmed.replace(/[^0-9]/g, '')
+      // Try matching barcode → itemCode from live stock data
+      const resolved = reverseBarcodeMap.get(trimmed)
+        || reverseBarcodeMap.get(normalized)
+        || normalized || trimmed
       setSearch(resolved)
       setDeptFilter('All')
     },
-    [productCodes],
+    [reverseBarcodeMap],
   )
 
   // ── Resolve barcode for item ──────────────────────────────────────────────

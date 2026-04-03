@@ -382,6 +382,39 @@ export async function searchItems(query: string, limit = 20): Promise<SearchResu
   return jarvisFetch<SearchResult>(`/api/pos/search?${params}`)
 }
 
+// ── Order / Supplier info ──────────────────────────────────────────────────
+
+export interface SupplierInfo {
+  supplierName: string
+  supplierId: number
+  orderCode: string | null
+  orderCodeRaw: string | null
+  supplierRef: string | null
+  ctnCost: number
+  ctnQty: number
+  unitCost: number
+  minOrderQty: number
+  isPrimary: boolean
+  lastOrdered: string | null
+  lastReceived: string | null
+  lastReceivedCost: number | null
+}
+
+export interface OrderInfo {
+  itemCode: string
+  description: string
+  barcode: string
+  sellPrice: number
+  qoh: number
+  suppliers: SupplierInfo[]
+}
+
+export async function getOrderInfo(itemCode: string): Promise<OrderInfo | null> {
+  try {
+    return await jarvisFetch<OrderInfo>(`/api/pos/order-info/${encodeURIComponent(itemCode)}`)
+  } catch { return null }
+}
+
 export async function getItemPrice(itemCode: string): Promise<PriceCheck> {
   return jarvisFetch<PriceCheck>(`/api/pos/price/${encodeURIComponent(itemCode)}`)
 }
