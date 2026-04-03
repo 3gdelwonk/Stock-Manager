@@ -47,52 +47,12 @@ async function pushImageToJarvis(itemCode: string, imageUrl: string): Promise<vo
 
 // ── Query building ──────────────────────────────────────────────────────────
 
-// POS descriptions use heavy abbreviations — expand for better image search
-const POS_ABBREVS: [RegExp, string][] = [
-  // Brands
-  [/\bA\/FRSH\b/gi, 'Always Fresh'], [/\bA\/PARK\b/gi, 'Angas Park'],
-  [/\b333'?S\b/gi, 'Three Threes'], [/\bS\/BRAND\b/gi, 'Savings'],
-  [/\bB\/EYE\b/gi, 'Birds Eye'], [/\bB\/GOLD\b/gi, 'Black Gold'],
-  [/\bM\/PARK\b/gi, 'Meadow Park'], [/\bP\/GOLD\b/gi, 'Pure Gold'],
-  [/\bS\/DALE\b/gi, 'Sunnydale'], [/\bL\/JACK\b/gi, 'Lumberjack'],
-  // Wine
-  [/\bSHZ\b/gi, 'Shiraz'], [/\bCHARD\b/gi, 'Chardonnay'],
-  [/\bCAB\b/gi, 'Cabernet'], [/\bSAUV\b/gi, 'Sauvignon'],
-  [/\bMRLT\b/gi, 'Merlot'], [/\bPNT\b/gi, 'Pinot'],
-  [/\bSPRK\b/gi, 'Sparkling'], [/\bRSLNG\b/gi, 'Riesling'],
-  // Food terms
-  [/\bBRD\b/gi, 'Bread'], [/\bSWT\b/gi, 'Sweet'], [/\bSCE\b/gi, 'Sauce'],
-  [/\bPCKLD\b/gi, 'Pickled'], [/\bPCKL\b/gi, 'Pickle'], [/\bPSTRIES\b/gi, 'Pastries'],
-  [/\bCHOC\b/gi, 'Chocolate'], [/\bCHS\b/gi, 'Cheese'], [/\bBTR\b/gi, 'Butter'],
-  [/\bCKN\b/gi, 'Chicken'], [/\bK\/MATA\b/gi, 'Kalamata'],
-  [/\bS\/DRD\b/gi, 'Sun Dried'], [/\bS\/DRIED\b/gi, 'Sun Dried'],
-  [/\bSTFD\b/gi, 'Stuffed'], [/\bSLCD\b/gi, 'Sliced'], [/\bPTD\b/gi, 'Pitted'],
-  [/\bRST\b/gi, 'Roast'], [/\bMRNT\b/gi, 'Marinated'], [/\bMRNTD\b/gi, 'Marinated'],
-  [/\bSTRPS\b/gi, 'Strips'], [/\bHLVS\b/gi, 'Halves'],
-  [/\bWHT\b/gi, 'White'], [/\bWHLMEAL\b/gi, 'Wholemeal'],
-  [/\bORG\b/gi, 'Organic'], [/\bXTRA\b/gi, 'Extra'],
-  [/\bD\/STY\b/gi, 'Deli Style'], [/\bS\/GRN\b/gi, 'Spanish Green'],
-  [/\bSICILN\b/gi, 'Sicilian'], [/\bGRN\b/gi, 'Green'], [/\bBLCK\b/gi, 'Black'],
-  [/\bANCHOV\b/gi, 'Anchovy'], [/\bTOM\b/gi, 'Tomato'], [/\bPEPP\b/gi, 'Pepper'],
-  [/\bMSTRD\b/gi, 'Mustard'], [/\bFRT\b/gi, 'Fruit'],
-  [/\bCONDNSD\b/gi, 'Condensed'], [/\bEVAP\b/gi, 'Evaporated'],
-  [/\bF\/C\b/gi, 'Full Cream'], [/\bS\/F\b/gi, 'Sugar Free'],
-  [/\bL\/F\b/gi, 'Low Fat'], [/\bN\/F\b/gi, 'No Fat'],
-  [/\bOLD\/STY\b/gi, 'Old Style'], [/\bSPCD\b/gi, 'Spiced'], [/\bSPRD\b/gi, 'Spread'],
-  [/\bS\/DOUGH\b/gi, 'Sourdough'], [/\bGRNS\b/gi, 'Grains'],
-  [/\bVNE\b/gi, 'Vine'], [/\bRED\b/gi, 'Red'],
-]
-
-function expandAbbreviations(desc: string): string {
-  let s = desc
-  for (const [pat, rep] of POS_ABBREVS) s = s.replace(pat, rep)
-  return s
-}
+// PWA sends raw POS description + department to JARVISmart server,
+// which handles abbreviation expansion, cleaning, and query building.
+// This is just a simple fallback for Serper (manual picker).
 
 function cleanDescription(desc: string): string {
-  let clean = expandAbbreviations(desc)
-  // Remove volume/weight/pack size
-  // Remove volume/weight/pack — handle no-space cases like "540GM" or "750ML"
+  let clean = desc
   clean = clean.replace(/\d+[*xX]?\d*\s*ML\b/gi, '').replace(/\d+\s*L\b/gi, '')
   clean = clean.replace(/\d+\s*(S|PK|X)\b/gi, '')
   clean = clean.replace(/\d+\s*(GM|KG|G)\b/gi, '')
@@ -100,14 +60,9 @@ function cleanDescription(desc: string): string {
   return clean
 }
 
-function buildSearchQuery(description: string, department: string, barcode?: string | null): string {
+function buildSearchQuery(description: string, _department: string, barcode?: string | null): string {
   if (barcode) return `${barcode} product`
-  const cleaned = cleanDescription(description)
-  // Add department for context (skip generic "GROCERY")
-  const deptHint = department && !['GROCERY', ''].includes(department.toUpperCase())
-    ? ` ${department.toLowerCase()}`
-    : ''
-  return `${cleaned}${deptHint} product Australia`
+  return `${cleanDescription(description)} product`
 }
 
 // ── DDG image search (via JARVISmart server — no CORS issues) ───────────────
@@ -115,9 +70,11 @@ function buildSearchQuery(description: string, department: string, barcode?: str
 interface DdgImageResult { title: string; imageUrl: string; thumbnailUrl: string; width: number; height: number; source: string }
 interface DdgResponse { results?: DdgImageResult[]; error?: string }
 
-async function ddgImageSearch(query: string): Promise<string | null | 'error'> {
+async function ddgImageSearch(description: string, department: string, barcode?: string | null): Promise<string | null | 'error'> {
   try {
-    const res = await fetch(`${getJarvisBaseUrl()}/api/pos/ddg-images?q=${encodeURIComponent(query)}&num=5`, {
+    const params = new URLSearchParams({ description, department, num: '5' })
+    if (barcode) params.set('barcode', barcode)
+    const res = await fetch(`${getJarvisBaseUrl()}/api/pos/ddg-images?${params}`, {
       headers: { 'X-API-Key': getJarvisApiKey() },
     })
     if (!res.ok) return 'error'
@@ -181,27 +138,20 @@ export async function fetchAndCacheImage(
       return { url: jarvisUrl, allErrored: false }
     }
 
-    const descQuery = buildSearchQuery(description, department)
     let imageUrl: string | null = null
     let anySearchWorked = false
 
     // 2. DDG via JARVISmart server (primary — free & unlimited)
-    const ddgResult = await ddgImageSearch(descQuery)
+    // Server handles abbreviation expansion, query building, department context
+    const ddgResult = await ddgImageSearch(description, department, barcode)
     if (ddgResult !== 'error') {
       anySearchWorked = true
       if (ddgResult) imageUrl = ddgResult
     }
-    if (!imageUrl && barcode) {
-      const ddgBarcode = await ddgImageSearch(buildSearchQuery(description, department, barcode))
-      if (ddgBarcode !== 'error') {
-        anySearchWorked = true
-        if (ddgBarcode) imageUrl = ddgBarcode
-      }
-    }
 
     // 3. Serper fallback (only if DDG didn't find anything)
     if (!imageUrl) {
-      const serperResult = await serperImageSearch(descQuery)
+      const serperResult = await serperImageSearch(buildSearchQuery(description, department))
       if (serperResult !== 'error') {
         anySearchWorked = true
         if (serperResult) imageUrl = serperResult
@@ -345,23 +295,24 @@ export async function searchProductImages(
   }
 
   // Also try DDG via JARVISmart for more options
-  const ddgQueries = [buildSearchQuery(description, department), ...(barcode ? [buildSearchQuery(description, department, barcode)] : [])]
-  for (const query of ddgQueries) {
-    try {
-      const res = await fetch(`${getJarvisBaseUrl()}/api/pos/ddg-images?q=${encodeURIComponent(query)}&num=10`, {
-        headers: { 'X-API-Key': getJarvisApiKey() },
-      })
-      if (!res.ok) continue
+  try {
+    const ddgParams = new URLSearchParams({ description, department, num: '10' })
+    if (barcode) ddgParams.set('barcode', barcode)
+    const res = await fetch(`${getJarvisBaseUrl()}/api/pos/ddg-images?${ddgParams}`, {
+      headers: { 'X-API-Key': getJarvisApiKey() },
+    })
+    if (res.ok) {
       const data: DdgResponse = await res.json()
-      if (!data.results) continue
-      for (const img of data.results) {
-        if ((img.width === 0 || img.width >= 80) && (img.height === 0 || img.height >= 80) && !seen.has(img.imageUrl)) {
-          seen.add(img.imageUrl)
-          results.push({ imageUrl: img.imageUrl, title: img.title, source: img.source, width: img.width, height: img.height })
+      if (data.results) {
+        for (const img of data.results) {
+          if ((img.width === 0 || img.width >= 80) && (img.height === 0 || img.height >= 80) && !seen.has(img.imageUrl)) {
+            seen.add(img.imageUrl)
+            results.push({ imageUrl: img.imageUrl, title: img.title, source: img.source, width: img.width, height: img.height })
+          }
         }
       }
-    } catch { /* skip */ }
-  }
+    }
+  } catch { /* skip */ }
 
   return results
 }
