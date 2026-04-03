@@ -17,12 +17,23 @@ function getApiKey(): string {
 export { getBaseUrl, getApiKey }
 
 async function jarvisFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${getBaseUrl()}${path}`, {
-    headers: {
-      'X-API-Key': getApiKey(),
-      'Content-Type': 'application/json',
-    },
-  })
+  const url = `${getBaseUrl()}${path}`
+  let res: Response
+  try {
+    res = await fetch(url, {
+      headers: {
+        'X-API-Key': getApiKey(),
+        'Content-Type': 'application/json',
+      },
+    })
+  } catch (err) {
+    const base = getBaseUrl()
+    // Diagnose common issues
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:' && base.startsWith('http:')) {
+      throw new Error(`Mixed content blocked: cannot call HTTP API (${base}) from HTTPS page. Use Settings to set an HTTPS URL, or open this app via HTTP.`)
+    }
+    throw new Error(`Network error reaching ${base} — check the URL in Settings and ensure JARVISmart is reachable. (${(err as Error).message})`)
+  }
   if (!res.ok) throw new Error(`JARVISmart ${res.status}: ${res.statusText}`)
   return res.json() as Promise<T>
 }

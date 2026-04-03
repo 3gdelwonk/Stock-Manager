@@ -161,9 +161,12 @@ export default function Dashboard() {
           <span className="text-sm text-amber-800 font-medium">Offline — showing local data only</span>
         </div>
         {error && (
-          <div className="flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
-            <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
-            <span className="text-sm text-red-700">{error}</span>
+          <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+              <span className="text-sm text-red-700 font-medium">Connection failed</span>
+            </div>
+            <p className="text-xs text-red-600 mt-1">{error}</p>
           </div>
         )}
         {/* Expiry section still works offline */}
@@ -171,10 +174,14 @@ export default function Dashboard() {
         <QuickActions />
         <button
           onClick={() => fetchAll(true)}
-          className="w-full py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium active:bg-emerald-700"
+          disabled={refreshing}
+          className="w-full py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium active:bg-emerald-700 disabled:opacity-50"
         >
-          Retry Connection
+          {refreshing ? 'Retrying...' : 'Retry Connection'}
         </button>
+        <p className="text-xs text-gray-400 text-center">
+          Check JARVISmart URL in Settings. If using HTTPS, ensure your API also uses HTTPS.
+        </p>
       </div>
     )
   }
@@ -215,9 +222,12 @@ export default function Dashboard() {
 
       {/* Error banner */}
       {error && (
-        <div className="flex items-center gap-2 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
-          <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
-          <span className="text-sm text-red-700">{error}</span>
+        <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+            <span className="text-sm text-red-700 font-medium">Error</span>
+          </div>
+          <p className="text-xs text-red-600 mt-1">{error}</p>
         </div>
       )}
 

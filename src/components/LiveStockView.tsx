@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { RefreshCw, WifiOff, Search, ScanBarcode, ChevronDown, ChevronUp } from 'lucide-react'
+import { RefreshCw, WifiOff, Search, ScanBarcode, ChevronDown, ChevronUp, Database } from 'lucide-react'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { checkConnection, getStockLevels, getDepartmentBreakdown, type StockItem, type DepartmentBreakdown } from '../lib/jarvis'
 import { useProductCodeLookup } from '../lib/useProductCodes'
+import { db } from '../lib/db'
 import BarcodeScanner from './BarcodeScanner'
 import BarcodeStripe from './BarcodeStripe'
 import ProductImage from './ProductImage'
-import { DEPARTMENT_COLORS } from '../lib/constants'
+import { DEPARTMENT_COLORS, DEPARTMENT_LABELS } from '../lib/constants'
 
 // ── Department badge colors (keyed by JARVISmart department name) ────────────
 
@@ -45,6 +47,7 @@ export default function LiveStockView() {
   const [connected, setConnected] = useState<boolean | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastFetch, setLastFetch] = useState<Date | null>(null)
+  const [dataSource, setDataSource] = useState<'live' | 'local'>('live')
 
   const [stockItems, setStockItems] = useState<StockItem[] | null>(null)
   const [deptBreakdown, setDeptBreakdown] = useState<DepartmentBreakdown[] | null>(null)
@@ -57,6 +60,50 @@ export default function LiveStockView() {
 
   const { getOrderCode, resolveCode } = useProductCodeLookup()
 
+  // ── Local fallback data from Dexie ─────────────────────────────────────────
+  const localProducts = useLiveQuery(() => db.products.toArray(), [])
+  const localSnapshots = useLiveQuery(() => db.stockSnapshots.toArray(), [])
+
+  const localStockItems = useMemo((): StockItem[] | null => {
+    if (!localProducts || localProducts.length === 0) return null
+    // Build latest QOH map from snapshots
+    const latestQoh = new Map<number, number>()
+    if (localSnapshots) {
+      for (const s of localSnapshots) {
+        const existing = latestQoh.get(s.productId)
+        if (existing === undefined) latestQoh.set(s.productId, s.qoh)
+        // keep latest by checking importedAt
+      }
+      // More accurate: group by productId and pick latest
+      const byProduct = new Map<number, typeof localSnapshots>()
+      for (const s of localSnapshots) {
+        const arr = byProduct.get(s.productId) ?? []
+        arr.push(s)
+        byProduct.set(s.productId, arr)
+      }
+      for (const [pid, snaps] of byProduct) {
+        const latest = snaps.reduce((best, s) => s.importedAt > best.importedAt ? s : best, snaps[0])
+        latestQoh.set(pid, latest.qoh)
+      }
+    }
+
+    return localProducts.map(p => ({
+      itemCode: p.itemCode,
+      barcode: p.barcode ?? null,
+      description: p.name,
+      department: DEPARTMENT_LABELS[p.department] ?? p.department,
+      departmentCode: p.departmentCode,
+      onHand: latestQoh.get(p.id!) ?? 0,
+      reorderLevel: p.minStockLevel,
+      sellPrice: p.sellPrice,
+      avgCost: p.costPrice,
+      onOrder: 0,
+      isOnReorder: false,
+      avgDayQty: 0,
+      avgWeekQty: 0,
+    }))
+  }, [localProducts, localSnapshots])
+
   // ── Data fetching ──────────────────────────────────────────────────────────
 
   const fetchAll = useCallback(async () => {
@@ -67,6 +114,7 @@ export default function LiveStockView() {
       setConnected(status.connected)
       if (!status.connected) {
         setError(status.reason ?? 'Cannot reach JARVISmart')
+        setDataSource('local')
         setLoading(false)
         return
       }
@@ -78,9 +126,11 @@ export default function LiveStockView() {
       setStockItems(stock)
       setDeptBreakdown(depts)
       setLastFetch(new Date())
+      setDataSource('live')
     } catch (err) {
       setError((err as Error).message)
       setConnected(false)
+      setDataSource('local')
     } finally {
       setLoading(false)
     }
@@ -92,6 +142,9 @@ export default function LiveStockView() {
     return () => clearInterval(id)
   }, [fetchAll])
 
+  // Use live API data if available, otherwise fall back to local imported data
+  const effectiveStockItems = stockItems ?? (dataSource === 'local' ? localStockItems : null)
+
   // ── Barcode scan handler ───────────────────────────────────────────────────
 
   const handleScan = useCallback((code: string) => {
@@ -102,13 +155,13 @@ export default function LiveStockView() {
   // ── Derived: unique departments with counts ────────────────────────────────
 
   const departmentCounts = useMemo(() => {
-    if (!stockItems) return new Map<string, number>()
+    if (!effectiveStockItems) return new Map<string, number>()
     const counts = new Map<string, number>()
-    for (const item of stockItems) {
+    for (const item of effectiveStockItems) {
       counts.set(item.department, (counts.get(item.department) ?? 0) + 1)
     }
     return counts
-  }, [stockItems])
+  }, [effectiveStockItems])
 
   const departmentNames = useMemo(
     () => Array.from(departmentCounts.keys()).sort(),
@@ -130,9 +183,9 @@ export default function LiveStockView() {
   // ── Filtered + sorted stock ────────────────────────────────────────────────
 
   const filteredStock = useMemo(() => {
-    if (!stockItems) return []
+    if (!effectiveStockItems) return []
 
-    let items = stockItems
+    let items = effectiveStockItems
 
     // Department filter
     if (selectedDept) {
@@ -171,7 +224,7 @@ export default function LiveStockView() {
     }
 
     return sorted
-  }, [stockItems, selectedDept, searchQuery, sortMode, getOrderCode])
+  }, [effectiveStockItems, selectedDept, searchQuery, sortMode, getOrderCode])
 
   // ── Grouped by department (for "All" view) ─────────────────────────────────
 
@@ -320,12 +373,17 @@ export default function LiveStockView() {
   const statusBanner = (
     <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 bg-white shrink-0">
       <div className="flex items-center gap-2">
-        {connected === null ? (
+        {connected === null && loading ? (
           <span className="text-xs text-gray-400">Connecting...</span>
         ) : connected ? (
           <>
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
             <span className="text-xs text-emerald-600 font-medium">Live &middot; JARVISmart</span>
+          </>
+        ) : dataSource === 'local' && effectiveStockItems ? (
+          <>
+            <Database size={12} className="text-amber-500 shrink-0" />
+            <span className="text-xs text-amber-600 font-medium">Offline &middot; Imported data</span>
           </>
         ) : (
           <>
@@ -352,7 +410,7 @@ export default function LiveStockView() {
 
   // ── Loading state (first fetch) ────────────────────────────────────────────
 
-  if (loading && !stockItems) {
+  if (loading && !effectiveStockItems) {
     return (
       <div className="flex flex-col h-full bg-gray-50">
         {statusBanner}
@@ -363,9 +421,9 @@ export default function LiveStockView() {
     )
   }
 
-  // ── Offline / error state ──────────────────────────────────────────────────
+  // ── Offline / error state (no data at all) ─────────────────────────────────
 
-  if (connected === false && !stockItems) {
+  if (connected === false && !effectiveStockItems) {
     return (
       <div className="flex flex-col h-full bg-gray-50">
         {statusBanner}
@@ -373,6 +431,7 @@ export default function LiveStockView() {
           <WifiOff size={40} className="text-red-200" />
           <p className="text-sm font-medium text-red-600">Cannot reach JARVISmart</p>
           <p className="text-xs text-gray-400 max-w-xs">{error}</p>
+          <p className="text-xs text-gray-400">Import stock data via Settings to view offline.</p>
           <button
             onClick={fetchAll}
             disabled={loading}
@@ -402,7 +461,7 @@ export default function LiveStockView() {
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
-            All ({stockItems?.length ?? 0})
+            All ({effectiveStockItems?.length ?? 0})
           </button>
           {departmentNames.map(dept => (
             <button
@@ -466,13 +525,13 @@ export default function LiveStockView() {
       </div>
 
       {/* ── Stock count summary ───────────────────────────────────────────── */}
-      {stockItems && (
+      {effectiveStockItems && (
         <div className="px-4 py-1.5 bg-gray-50 shrink-0">
           <p className="text-xs text-gray-400">
-            {filteredStock.length} of {stockItems.length} items
+            {filteredStock.length} of {effectiveStockItems.length} items
             {selectedDept && <> in <span className="font-medium text-gray-500">{selectedDept}</span></>}
             {searchQuery && <> matching &ldquo;{searchQuery}&rdquo;</>}
-            {' '}&middot; live QOH
+            {' '}&middot; {dataSource === 'live' ? 'live QOH' : 'imported data'}
           </p>
         </div>
       )}
@@ -494,7 +553,7 @@ export default function LiveStockView() {
             )
           ) : (
             <p className="text-center text-sm text-gray-400 py-12">
-              {loading ? 'Loading stock levels...' : searchQuery ? 'No items match your search' : 'No stock data available'}
+              {loading ? 'Loading stock levels...' : searchQuery ? 'No items match your search' : 'No stock data — import via Settings or connect to JARVISmart'}
             </p>
           )}
         </div>
