@@ -10,7 +10,7 @@ import {
 } from '../lib/jarvis'
 import { useProductCodeLookup } from '../lib/useProductCodes'
 import { useProductExpiry, type ExpiryInfo } from '../lib/useProductExpiry'
-import { prefetchImages, isImageSearchConfigured, type PrefetchProgress } from '../lib/images'
+import { prefetchImages, type PrefetchProgress } from '../lib/images'
 import BarcodeScanner from './BarcodeScanner'
 import BarcodeStripe from './BarcodeStripe'
 import ProductImage from './ProductImage'
@@ -468,13 +468,12 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     return () => clearInterval(interval)
   }, [fetchData])
 
-  // ── Auto-prefetch images once when stock first loads ──
+  // ── Auto-prefetch images once per mount ──
   const imgStartedRef = useRef(false)
   useEffect(() => {
-    if (stockItems.length === 0 || !isImageSearchConfigured() || imgStartedRef.current) return
+    if (stockItems.length === 0 || imgStartedRef.current) return
     imgStartedRef.current = true
 
-    // Sort by velocity (high-selling items first) for image priority
     const items = [...stockItems]
       .sort((a, b) => (b.avgDayQty ?? 0) - (a.avgDayQty ?? 0))
       .map(s => ({ itemCode: s.itemCode, description: s.description, department: s.department, barcode: s.barcode ?? undefined }))
@@ -485,20 +484,19 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
 
     prefetchImages(items, (p) => {
       setImgProgress(p)
-      // If credits exhausted, keep banner visible (no auto-hide)
       if (p.creditsExhausted) setImgDone(true)
     }, controller.signal)
       .then(() => {
         setImgDone(true)
-        // Auto-hide after 5s unless credits exhausted (keep that warning visible)
         setTimeout(() => {
           setImgProgress(prev => prev?.creditsExhausted ? prev : null)
         }, 5000)
       })
-      .catch(() => {})
+      .catch(() => { /* aborted or error — silently stop */ })
 
     return () => { controller.abort() }
-  }, [stockItems.length]) // trigger once when stock count goes from 0 → N
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stockItems.length > 0]) // only fires once: false → true
 
   // ── Build lookup maps ──
   const promoMap = useMemo(() => {

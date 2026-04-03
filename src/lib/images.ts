@@ -19,7 +19,7 @@ function getSerperApiKey(): string {
 }
 
 export function isImageSearchConfigured(): boolean {
-  return true // DDG search is always available via JARVISmart server
+  return !!getJarvisBaseUrl() || !!getSerperApiKey()
 }
 
 // ── JARVISmart image endpoints ──────────────────────────────────────────────
@@ -118,40 +118,44 @@ export async function deleteCachedImage(itemCode: string): Promise<void> {
 export async function fetchAndCacheImage(
   itemCode: string, description: string, department: string, barcode?: string | null,
 ): Promise<string | null> {
-  const cached = await getCachedImageUrl(itemCode)
-  if (cached !== null) return cached || null
+  try {
+    const cached = await getCachedImageUrl(itemCode)
+    if (cached !== null) return cached || null
 
-  // 1. Check JARVISmart server
-  const jarvisUrl = await getJarvisImage(itemCode)
-  if (jarvisUrl) {
-    await db.imageCache.put({ itemCode, imageUrl: jarvisUrl, fetchedAt: new Date() })
-    return jarvisUrl
-  }
-
-  // 2. DDG via Cloudflare Worker (primary — free & unlimited)
-  const descQuery = buildSearchQuery(description, department)
-  let imageUrl = await ddgImageSearch(descQuery)
-  if (imageUrl === null && barcode) {
-    imageUrl = await ddgImageSearch(buildSearchQuery(description, department, barcode))
-  }
-
-  // 3. Serper fallback if DDG fails
-  if (imageUrl === 'error' || imageUrl === null) {
-    const serperResult = await serperImageSearch(descQuery)
-    if (serperResult !== 'error' && serperResult !== null) {
-      imageUrl = serperResult
-    } else if (serperResult === null && barcode) {
-      const barcodeResult = await serperImageSearch(buildSearchQuery(description, department, barcode))
-      if (barcodeResult !== 'error') imageUrl = barcodeResult
+    // 1. Check JARVISmart server
+    const jarvisUrl = await getJarvisImage(itemCode)
+    if (jarvisUrl) {
+      await db.imageCache.put({ itemCode, imageUrl: jarvisUrl, fetchedAt: new Date() })
+      return jarvisUrl
     }
+
+    // 2. DDG via JARVISmart server (primary — free & unlimited)
+    const descQuery = buildSearchQuery(description, department)
+    let imageUrl = await ddgImageSearch(descQuery)
+    if (imageUrl === null && barcode) {
+      imageUrl = await ddgImageSearch(buildSearchQuery(description, department, barcode))
+    }
+
+    // 3. Serper fallback if DDG fails
+    if (imageUrl === 'error' || imageUrl === null) {
+      const serperResult = await serperImageSearch(descQuery)
+      if (serperResult !== 'error' && serperResult !== null) {
+        imageUrl = serperResult
+      } else if (serperResult === null && barcode) {
+        const barcodeResult = await serperImageSearch(buildSearchQuery(description, department, barcode))
+        if (barcodeResult !== 'error') imageUrl = barcodeResult
+      }
+    }
+
+    // Don't cache if both sources errored (allow retry later)
+    if (imageUrl === 'error') return null
+
+    await db.imageCache.put({ itemCode, imageUrl: imageUrl ?? '', fetchedAt: new Date() })
+    if (imageUrl) pushImageToJarvis(itemCode, imageUrl)
+    return imageUrl
+  } catch {
+    return null // never throw — caller handles null gracefully
   }
-
-  // Don't cache if both sources errored (allow retry later)
-  if (imageUrl === 'error') return null
-
-  await db.imageCache.put({ itemCode, imageUrl: imageUrl ?? '', fetchedAt: new Date() })
-  if (imageUrl) pushImageToJarvis(itemCode, imageUrl)
-  return imageUrl
 }
 
 // ── Bulk prefetch ───────────────────────────────────────────────────────────
@@ -174,11 +178,15 @@ export async function prefetchImages(
   // First pass: filter out already-cached items
   const uncached: typeof items = []
   let skipped = 0
-  for (const item of items) {
-    if (signal?.aborted) break
-    const existing = await db.imageCache.get(item.itemCode)
-    if (existing) { skipped++; continue }
-    uncached.push(item)
+  try {
+    for (const item of items) {
+      if (signal?.aborted) break
+      const existing = await db.imageCache.get(item.itemCode)
+      if (existing) { skipped++; continue }
+      uncached.push(item)
+    }
+  } catch {
+    // IndexedDB error — proceed with what we have
   }
 
   if (uncached.length === 0) {
@@ -191,19 +199,20 @@ export async function prefetchImages(
 
   for (const item of uncached) {
     if (signal?.aborted) break
-    const url = await fetchAndCacheImage(item.itemCode, item.description, item.department, item.barcode)
-    done++
-    if (url) {
-      found++
-      consecutiveErrors = 0
-    } else {
-      const entry = await db.imageCache.get(item.itemCode)
-      if (!entry) {
-        errors++
-        consecutiveErrors++
-      } else {
+    try {
+      const url = await fetchAndCacheImage(item.itemCode, item.description, item.department, item.barcode)
+      done++
+      if (url) {
+        found++
         consecutiveErrors = 0
+      } else {
+        consecutiveErrors++
+        errors++
       }
+    } catch {
+      done++
+      errors++
+      consecutiveErrors++
     }
 
     const exhausted = consecutiveErrors >= 5
