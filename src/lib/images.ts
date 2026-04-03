@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════════
 // Product Image Service — Grocery Manager
-// Priority: local IndexedDB cache → JARVISmart server → DDG/Serper (two-tier)
+// Priority: local IndexedDB cache → JARVISmart server → Serper (Google)
 // ═══════════════════════════════════════════════
 
 import { db } from './db'
-import { serperImageSearch, serperImageSearchMulti, canUseSerper, isSerperSearched, markSerperSearched } from './serper'
+import { serperImageSearch, serperImageSearchMulti, canUseSerper, markSerperSearched } from './serper'
 
 // ── Config helpers ──────────────────────────────────────────────────────────
 
@@ -42,22 +42,7 @@ async function pushImageToJarvis(itemCode: string, imageUrl: string): Promise<vo
   } catch { /* best-effort */ }
 }
 
-// ── Placeholder / stock photo filter ───────────────────────────────────────
-
-const PLACEHOLDER_RE = /placeholder|no-?image|default[-_]image|spacer|1x1\.|pixel\.gif/i
-const STOCK_PHOTO_RE = /shutterstock|istockphoto|gettyimages|depositphotos/i
-
-function isPlaceholderUrl(url: string): boolean {
-  return PLACEHOLDER_RE.test(url) || STOCK_PHOTO_RE.test(url)
-}
-
-// ── Search priority config (for manual picker / single refetch) ────────────
-
-function getSearchPriority(): 'ddg' | 'serper' {
-  return (localStorage.getItem('grocery-manager-search-priority') as 'ddg' | 'serper') || 'ddg'
-}
-
-// ── Query building (simple fallback for Serper manual picker) ──────────────
+// ── Query building ────────────────────────────────────────────────────────
 
 function cleanDescription(desc: string): string {
   let clean = desc
@@ -73,28 +58,6 @@ function buildSearchQuery(description: string, _department: string, barcode?: st
   return `${cleanDescription(description)} product`
 }
 
-// ── DDG image search (via JARVISmart server — no CORS issues) ───────────────
-
-interface DdgImageResult { title: string; imageUrl: string; thumbnailUrl: string; width: number; height: number; source: string }
-interface DdgResponse { results?: DdgImageResult[]; error?: string }
-
-async function ddgImageSearch(description: string, department: string, barcode?: string | null): Promise<string | null | 'error'> {
-  try {
-    const params = new URLSearchParams({ description, department, num: '15' })
-    if (barcode) params.set('barcode', barcode)
-    const res = await fetch(`${getJarvisBaseUrl()}/api/pos/ddg-images?${params}`, {
-      headers: { 'X-API-Key': getJarvisApiKey() },
-    })
-    if (!res.ok) return 'error'
-    const data: DdgResponse = await res.json()
-    if (data.error || !data.results || data.results.length === 0) return null
-    const acceptable = data.results.filter(i =>
-      (i.width === 0 || i.width >= 100) && (i.height === 0 || i.height >= 100) && !isPlaceholderUrl(i.imageUrl)
-    )
-    return acceptable[0]?.imageUrl ?? null
-  } catch { return 'error' }
-}
-
 // ── Cache helpers ───────────────────────────────────────────────────────────
 
 export async function getCachedImageUrl(itemCode: string): Promise<string | null> {
@@ -107,14 +70,11 @@ export async function deleteCachedImage(itemCode: string): Promise<void> {
 }
 
 // ── Fetch & cache (used by bulk prefetch + single refetch) ─────────────────
-// Queue-based: if item hasn't been Serper-searched yet AND budget allows → Serper first, DDG fallback
-// If already Serper-searched or no budget → DDG only
-// manual=true → use manual search priority toggle (for picker/refetch)
+// Serper only — no DDG fallback. JARVISmart server checked first (pre-populated).
 
 export async function fetchAndCacheImage(
   itemCode: string, description: string, department: string,
   barcode?: string | null,
-  manual?: boolean,
 ): Promise<{ url: string | null; allErrored: boolean }> {
   try {
     const cached = await getCachedImageUrl(itemCode)
@@ -128,41 +88,25 @@ export async function fetchAndCacheImage(
       return { url: jarvisUrl, allErrored: false }
     }
 
+    // 2. Serper image search (budget-gated)
+    if (!canUseSerper('images')) {
+      return { url: null, allErrored: true }
+    }
+
     let imageUrl: string | null = null
     let anySearchWorked = false
 
-    const tryDdg = async () => {
-      const r = await ddgImageSearch(description, department, barcode)
-      if (r !== 'error') { anySearchWorked = true; if (r) imageUrl = r }
-    }
-    const trySerper = async () => {
-      const r = await serperImageSearch(buildSearchQuery(description, department))
-      if (r !== 'error') { anySearchWorked = true; if (r) imageUrl = r }
-      // Barcode retry only for manual picker, not bulk prefetch
-      if (!imageUrl && barcode && manual) {
-        const r2 = await serperImageSearch(buildSearchQuery(description, department, barcode))
-        if (r2 !== 'error') { anySearchWorked = true; if (r2) imageUrl = r2 }
-      }
-      // Mark as Serper-searched regardless of result
-      await markSerperSearched(itemCode)
+    const r = await serperImageSearch(buildSearchQuery(description, department))
+    if (r !== 'error') { anySearchWorked = true; if (r) imageUrl = r }
+
+    // Barcode retry if first attempt found nothing
+    if (!imageUrl && barcode) {
+      const r2 = await serperImageSearch(buildSearchQuery(description, department, barcode))
+      if (r2 !== 'error') { anySearchWorked = true; if (r2) imageUrl = r2 }
     }
 
-    // 2 & 3. Decide search strategy
-    if (manual) {
-      // Manual picker / refetch — use priority toggle
-      const [primary, fallback] = getSearchPriority() === 'serper' ? [trySerper, tryDdg] : [tryDdg, trySerper]
-      await primary()
-      if (!imageUrl) await fallback()
-    } else {
-      // Bulk prefetch — queue-based: Serper if not yet searched + budget available
-      const alreadySearched = await isSerperSearched(itemCode)
-      if (!alreadySearched && canUseSerper('images')) {
-        await trySerper()
-        if (!imageUrl) await tryDdg()
-      } else {
-        await tryDdg()
-      }
-    }
+    // Mark as Serper-searched regardless of result
+    await markSerperSearched(itemCode)
 
     if (imageUrl) {
       await db.imageCache.put({ itemCode, imageUrl, fetchedAt: new Date() })
@@ -260,28 +204,13 @@ export async function clearFailedImageCache(): Promise<number> {
   return failed.length
 }
 
-/** Clear images that were NOT fetched via Serper — allows re-population through Serper.
- *  Keeps JARVISmart pre-populated images (they'll be re-fetched from server anyway)
- *  and empty (not-found) entries. Removes DDG-sourced local cache entries. */
-export async function clearNonSerperImageCache(): Promise<number> {
-  const all = await db.imageCache.toArray()
-  const toDelete: string[] = []
-  for (const entry of all) {
-    if (!entry.imageUrl) continue // skip not-found entries
-    const searched = await isSerperSearched(entry.itemCode)
-    if (!searched) toDelete.push(entry.itemCode) // not Serper-searched → DDG image → clear it
-  }
-  if (toDelete.length > 0) await db.imageCache.bulkDelete(toDelete)
-  return toDelete.length
-}
-
 export async function getImageCacheStats(): Promise<{ total: number; found: number; failed: number }> {
   const all = await db.imageCache.toArray()
   const found = all.filter(e => e.imageUrl !== '').length
   return { total: all.length, found, failed: all.length - found }
 }
 
-// ── Manual image picker (uses Serper + DDG) ────────────────────────────────
+// ── Manual image picker (Serper only) ─────────────────────────────────────
 
 export interface ImageOption { imageUrl: string; title: string; source: string; width: number; height: number }
 
@@ -291,39 +220,18 @@ export async function searchProductImages(
   const seen = new Set<string>()
   const results: ImageOption[] = []
 
-  // Try Serper first (better quality for manual selection, budget-gated)
-  if (canUseSerper('images')) {
-    const queries = [buildSearchQuery(description, department), ...(barcode ? [buildSearchQuery(description, department, barcode)] : [])]
-    for (const query of queries) {
-      const imgs = await serperImageSearchMulti(query, 10)
-      for (const img of imgs) {
-        if (!seen.has(img.imageUrl)) {
-          seen.add(img.imageUrl)
-          results.push(img)
-        }
+  if (!canUseSerper('images')) return results
+
+  const queries = [buildSearchQuery(description, department), ...(barcode ? [buildSearchQuery(description, department, barcode)] : [])]
+  for (const query of queries) {
+    const imgs = await serperImageSearchMulti(query, 10)
+    for (const img of imgs) {
+      if (!seen.has(img.imageUrl)) {
+        seen.add(img.imageUrl)
+        results.push(img)
       }
     }
   }
-
-  // Also try DDG via JARVISmart for more options
-  try {
-    const ddgParams = new URLSearchParams({ description, department, num: '10' })
-    if (barcode) ddgParams.set('barcode', barcode)
-    const res = await fetch(`${getJarvisBaseUrl()}/api/pos/ddg-images?${ddgParams}`, {
-      headers: { 'X-API-Key': getJarvisApiKey() },
-    })
-    if (res.ok) {
-      const data: DdgResponse = await res.json()
-      if (data.results) {
-        for (const img of data.results) {
-          if ((img.width === 0 || img.width >= 80) && (img.height === 0 || img.height >= 80) && !seen.has(img.imageUrl)) {
-            seen.add(img.imageUrl)
-            results.push({ imageUrl: img.imageUrl, title: img.title, source: img.source, width: img.width, height: img.height })
-          }
-        }
-      }
-    }
-  } catch { /* skip */ }
 
   return results
 }

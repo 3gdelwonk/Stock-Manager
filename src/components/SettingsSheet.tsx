@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { clearAllData } from '../lib/db'
 import { getStockLevels } from '../lib/jarvis'
-import { prefetchImages, isImageSearchConfigured, clearImageCache, clearFailedImageCache, clearNonSerperImageCache, getImageCacheStats, type PrefetchProgress } from '../lib/images'
+import { prefetchImages, isImageSearchConfigured, clearImageCache, clearFailedImageCache, getImageCacheStats, type PrefetchProgress } from '../lib/images'
 import {
   getSerperUsage, getSerperBudget, setSerperBudget, resetSerperUsage,
   computeImagePriority, getSerperSearchedCount, clearSerperSearched,
@@ -46,7 +46,6 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [prefetchProgress, setPrefetchProgress] = useState<PrefetchProgress | null>(null)
   const [showImport, setShowImport] = useState(false)
   const [cacheStats, setCacheStats] = useState<{ total: number; found: number; failed: number } | null>(null)
-  const [searchPriority, setSearchPriority] = useState(() => localStorage.getItem('grocery-manager-search-priority') || 'ddg')
   const abortRef = useRef<AbortController | null>(null)
 
   // Serper budget state
@@ -302,28 +301,6 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* Manual search priority toggle */}
-          {serperApiKey.trim() && (
-            <div className="mt-2">
-              <label className="text-xs font-medium text-gray-600">Manual Search Priority</label>
-              <div className="flex gap-1 mt-1">
-                <button
-                  onClick={() => { setSearchPriority('ddg'); localStorage.setItem('grocery-manager-search-priority', 'ddg') }}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${searchPriority === 'ddg' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}`}
-                >
-                  DDG First (Free)
-                </button>
-                <button
-                  onClick={() => { setSearchPriority('serper'); localStorage.setItem('grocery-manager-search-priority', 'serper') }}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${searchPriority === 'serper' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}`}
-                >
-                  Serper First (Paid)
-                </button>
-              </div>
-              <p className="text-[10px] text-gray-400 mt-1">For manual image picker and single-item refetch. Bulk prefetch uses two-tier system automatically.</p>
-            </div>
-          )}
-
           {isImageSearchConfigured() && (
             <div className="mt-2">
               <button
@@ -397,21 +374,13 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
               Retry Not-Found{cacheStats ? ` (${cacheStats.failed})` : ''}
             </button>
             <button
-              onClick={async () => { const n = await clearNonSerperImageCache(); setCacheStats(await getImageCacheStats()); alert(`Cleared ${n} DDG images. They will be re-populated through Serper on next prefetch.`) }}
-              className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-blue-50 text-blue-600 hover:bg-blue-100"
-            >
-              Clear DDG Images
-            </button>
-          </div>
-          <div className="flex gap-2">
-            <button
               onClick={async () => { const n = await clearImageCache(); setCacheStats({ total: 0, found: 0, failed: 0 }); alert(`Cleared local cache (${n} entries). JARVISmart images are safe — they will be re-downloaded on next fetch.`) }}
               className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200"
             >
               Clear All Local{cacheStats ? ` (${cacheStats.total})` : ''}
             </button>
           </div>
-          <p className="text-[10px] text-gray-400">Local cache only — JARVISmart server images are never deleted. "Clear DDG" removes non-Serper images for re-population.</p>
+          <p className="text-[10px] text-gray-400">Local cache only — JARVISmart server images are never deleted.</p>
         </div>
 
         <div className="border-t border-gray-100 pt-4">
