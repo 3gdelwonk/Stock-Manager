@@ -47,7 +47,7 @@ function deptBadgeClass(dept: string): string {
   return DEPT_BADGE_COLORS[dept.toUpperCase()] ?? 'bg-gray-100 text-gray-600'
 }
 
-type SortKey = 'name' | 'department' | 'velocity' | 'margin' | 'qoh'
+type SortKey = 'margin' | 'revenue'
 
 function fmtMoney(n: number): string {
   return n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -61,6 +61,7 @@ interface EnrichedStockItem {
   topSeller: boolean
   slowMover: boolean
   margin: number
+  revenue: number
   expiryInfo: ExpiryInfo | null
   orderCode: string | null
 }
@@ -383,7 +384,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
 
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('All')
-  const [sortKey, setSortKey] = useState<SortKey>('department')
+  const [sortKey, setSortKey] = useState<SortKey>('revenue')
   const [scannerOpen, setScannerOpen] = useState(false)
 
   // ── Modals ──
@@ -423,7 +424,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       }
 
       const [stockData, promoData, topData] = await Promise.allSettled([
-        getStockLevels({ limit: 5000 }),
+        getStockLevels({ limit: 50000 }),
         getPromotions(),
         getTopSellers(7, 50),
       ])
@@ -474,6 +475,28 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     return set
   }, [stockItems])
 
+  // ── Revenue lookup from top sellers ──
+  const revenueMap = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const t of topSellers) map.set(t.itemCode, t.revenue)
+    return map
+  }, [topSellers])
+
+  // ── Log 5 sample order codes for verification ──
+  useEffect(() => {
+    if (productCodes.ready && stockItems.length > 0) {
+      const samples: { barcode: string | null; orderCode: string | null; description: string }[] = []
+      for (const s of stockItems) {
+        if (samples.length >= 5) break
+        const oc = productCodes.getOrderCode(s.barcode)
+        if (oc) samples.push({ barcode: s.barcode, orderCode: oc, description: s.description })
+      }
+      if (samples.length > 0) {
+        console.log('[StockView] Sample order codes:', samples)
+      }
+    }
+  }, [productCodes, stockItems])
+
   // ── Barcode scan ──
   const handleBarcodeScan = useCallback((code: string) => {
     setScannerOpen(false)
@@ -492,11 +515,12 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
         topSeller: topSellerCodes.has(stock.itemCode),
         slowMover: slowMoverCodes.has(stock.itemCode),
         margin,
+        revenue: revenueMap.get(stock.itemCode) ?? 0,
         expiryInfo: stock.barcode ? (expiryMap.get(stock.barcode) ?? null) : null,
         orderCode: productCodes.getOrderCode(stock.barcode),
       }
     })
-  }, [stockItems, promoMap, topSellerCodes, slowMoverCodes, expiryMap, productCodes])
+  }, [stockItems, promoMap, topSellerCodes, slowMoverCodes, revenueMap, expiryMap, productCodes])
 
   // ── Department list ──
   const departments = useMemo(() => {
@@ -515,7 +539,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       filtered = filtered.filter(e => e.stock.department === deptFilter)
     }
 
-    // Search
+    // Search (supports name, barcode, POS item code, and 8-digit order code)
     if (q) {
       filtered = filtered.filter(e => {
         const s = e.stock
@@ -530,11 +554,8 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     const sorted = [...filtered]
     sorted.sort((a, b) => {
       switch (sortKey) {
-        case 'name': return a.stock.description.localeCompare(b.stock.description)
-        case 'department': return a.stock.department.localeCompare(b.stock.department) || a.stock.description.localeCompare(b.stock.description)
-        case 'velocity': return (b.stock.avgDayQty ?? 0) - (a.stock.avgDayQty ?? 0)
         case 'margin': return b.margin - a.margin
-        case 'qoh': return a.stock.onHand - b.stock.onHand
+        case 'revenue': return b.revenue - a.revenue
         default: return 0
       }
     })
@@ -605,7 +626,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
             type="text"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Search name, barcode, order code..."
+            placeholder="Search name, barcode, 8-digit order code..."
             className="flex-1 bg-transparent text-sm text-gray-900 placeholder:text-gray-400 outline-none"
           />
           {search && (
@@ -644,11 +665,8 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       <div className="flex items-center gap-1.5 px-4 pb-2 shrink-0">
         <span className="text-[10px] text-gray-400 uppercase tracking-wider">Sort</span>
         {([
-          { key: 'department' as SortKey, label: 'Department' },
-          { key: 'name' as SortKey, label: 'Name' },
-          { key: 'velocity' as SortKey, label: 'Velocity' },
+          { key: 'revenue' as SortKey, label: 'Revenue' },
           { key: 'margin' as SortKey, label: 'Margin' },
-          { key: 'qoh' as SortKey, label: 'QOH' },
         ]).map(({ key, label }) => (
           <button
             key={key}
