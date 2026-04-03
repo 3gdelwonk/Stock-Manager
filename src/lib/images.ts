@@ -152,6 +152,7 @@ export async function fetchAndCacheImage(
     const jarvisUrl = await getJarvisImage(itemCode)
     if (jarvisUrl) {
       await db.imageCache.put({ itemCode, imageUrl: jarvisUrl, fetchedAt: new Date() })
+      window.dispatchEvent(new CustomEvent('image-cached', { detail: { itemCode, imageUrl: jarvisUrl } }))
       return { url: jarvisUrl, allErrored: false }
     }
 
@@ -179,6 +180,7 @@ export async function fetchAndCacheImage(
     if (imageUrl) {
       await db.imageCache.put({ itemCode, imageUrl, fetchedAt: new Date() })
       pushImageToJarvis(itemCode, imageUrl)
+      window.dispatchEvent(new CustomEvent('image-cached', { detail: { itemCode, imageUrl } }))
       return { url: imageUrl, allErrored: false }
     }
 

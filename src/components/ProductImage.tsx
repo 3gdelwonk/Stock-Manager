@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import {
   getCachedImageUrl, fetchAndCacheImage, deleteCachedImage,
-  isImageSearchConfigured, searchProductImages, saveSelectedImage,
+  searchProductImages, saveSelectedImage,
   type ImageOption
 } from '../lib/images'
 
@@ -159,24 +159,20 @@ export default function ProductImage({ itemCode, description, department, barcod
 
   useEffect(() => {
     let cancelled = false
+    // Only read from local cache — bulk prefetch handles fetching sequentially.
+    // Triggering fetchAndCacheImage here would fire thousands of parallel requests
+    // when the stock list renders all items, crashing the app.
+    getCachedImageUrl(itemCode).then(cached => {
+      if (cached && !cancelled) setImageUrl(cached)
+    })
 
-    async function loadImage() {
-      const cached = await getCachedImageUrl(itemCode)
-      if (cached && !cancelled) {
-        setImageUrl(cached)
-        return
-      }
-
-      if (isImageSearchConfigured() && cached === null) {
-        const result = await fetchAndCacheImage(itemCode, description, department, barcode)
-        if (result.url && !cancelled) {
-          setImageUrl(result.url)
-        }
-      }
+    // Listen for prefetch caching this item's image
+    function onImageCached(e: Event) {
+      const { itemCode: code, imageUrl: url } = (e as CustomEvent).detail
+      if (code === itemCode && url && !cancelled) setImageUrl(url)
     }
-
-    loadImage()
-    return () => { cancelled = true }
+    window.addEventListener('image-cached', onImageCached)
+    return () => { cancelled = true; window.removeEventListener('image-cached', onImageCached) }
   }, [itemCode, description, department])
 
   const handleRefetch = useCallback(async () => {
