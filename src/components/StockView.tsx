@@ -660,7 +660,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
             }`}>
               <span className="truncate">
                 {imgProgress.creditsExhausted
-                  ? `Serper credits depleted — ${imgProgress.total - imgProgress.done} products still need images. Top up or change API key.`
+                  ? `Image search unavailable — ${imgProgress.total - imgProgress.done} products remaining. Check JARVISmart connection.`
                   : imgDone
                     ? `Done — ${imgProgress.found} new images saved${imgProgress.skipped ? `, ${imgProgress.skipped} already cached` : ''}`
                     : `Fetching images: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`}

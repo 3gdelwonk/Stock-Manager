@@ -168,9 +168,9 @@ export default function ProductImage({ itemCode, description, department, barcod
       }
 
       if (isImageSearchConfigured() && cached === null) {
-        const url = await fetchAndCacheImage(itemCode, description, department, barcode)
-        if (url && !cancelled) {
-          setImageUrl(url)
+        const result = await fetchAndCacheImage(itemCode, description, department, barcode)
+        if (result.url && !cancelled) {
+          setImageUrl(result.url)
         }
       }
     }
@@ -185,8 +185,8 @@ export default function ProductImage({ itemCode, description, department, barcod
     await deleteCachedImage(itemCode)
     setImageUrl(null)
     setFailed(false)
-    const url = await fetchAndCacheImage(itemCode, description, department, barcode)
-    setImageUrl(url)
+    const result = await fetchAndCacheImage(itemCode, description, department, barcode)
+    setImageUrl(result.url)
     setRefetching(false)
   }, [itemCode, description, department, barcode])
 

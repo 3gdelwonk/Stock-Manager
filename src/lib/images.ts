@@ -115,46 +115,63 @@ export async function deleteCachedImage(itemCode: string): Promise<void> {
 // ── Fetch & cache (used by bulk prefetch) ───────────────────────────────────
 // Flow: local cache → JARVISmart → DDG Worker → Serper fallback
 
+// Returns: { url, allErrored }
+// url = image URL or null (no image found but search worked)
+// allErrored = true when every source returned an API error (not "no results")
 export async function fetchAndCacheImage(
   itemCode: string, description: string, department: string, barcode?: string | null,
-): Promise<string | null> {
+): Promise<{ url: string | null; allErrored: boolean }> {
   try {
     const cached = await getCachedImageUrl(itemCode)
-    if (cached !== null) return cached || null
+    if (cached !== null) return { url: cached || null, allErrored: false }
 
     // 1. Check JARVISmart server
     const jarvisUrl = await getJarvisImage(itemCode)
     if (jarvisUrl) {
       await db.imageCache.put({ itemCode, imageUrl: jarvisUrl, fetchedAt: new Date() })
-      return jarvisUrl
+      return { url: jarvisUrl, allErrored: false }
     }
 
     // 2. DDG via JARVISmart server (primary — free & unlimited)
     const descQuery = buildSearchQuery(description, department)
-    let imageUrl = await ddgImageSearch(descQuery)
-    if (imageUrl === null && barcode) {
-      imageUrl = await ddgImageSearch(buildSearchQuery(description, department, barcode))
+    let ddgResult = await ddgImageSearch(descQuery)
+    if (ddgResult === null && barcode) {
+      ddgResult = await ddgImageSearch(buildSearchQuery(description, department, barcode))
+    }
+    const ddgErrored = ddgResult === 'error'
+    const ddgUrl = ddgErrored ? null : ddgResult
+
+    // If DDG found something, use it
+    if (ddgUrl) {
+      await db.imageCache.put({ itemCode, imageUrl: ddgUrl, fetchedAt: new Date() })
+      pushImageToJarvis(itemCode, ddgUrl)
+      return { url: ddgUrl, allErrored: false }
     }
 
-    // 3. Serper fallback if DDG fails
-    if (imageUrl === 'error' || imageUrl === null) {
-      const serperResult = await serperImageSearch(descQuery)
-      if (serperResult !== 'error' && serperResult !== null) {
-        imageUrl = serperResult
-      } else if (serperResult === null && barcode) {
-        const barcodeResult = await serperImageSearch(buildSearchQuery(description, department, barcode))
-        if (barcodeResult !== 'error') imageUrl = barcodeResult
-      }
+    // 3. Serper fallback (only if DDG didn't find anything)
+    let serperResult = await serperImageSearch(descQuery)
+    if (serperResult === null && barcode) {
+      serperResult = await serperImageSearch(buildSearchQuery(description, department, barcode))
+    }
+    const serperErrored = serperResult === 'error'
+    const serperUrl = serperErrored ? null : serperResult
+
+    if (serperUrl) {
+      await db.imageCache.put({ itemCode, imageUrl: serperUrl, fetchedAt: new Date() })
+      pushImageToJarvis(itemCode, serperUrl)
+      return { url: serperUrl, allErrored: false }
     }
 
-    // Don't cache if both sources errored (allow retry later)
-    if (imageUrl === 'error') return null
+    // Both searched but no image found (not an error — cache empty so we don't retry)
+    if (!ddgErrored || !serperErrored) {
+      await db.imageCache.put({ itemCode, imageUrl: '', fetchedAt: new Date() })
+      return { url: null, allErrored: false }
+    }
 
-    await db.imageCache.put({ itemCode, imageUrl: imageUrl ?? '', fetchedAt: new Date() })
-    if (imageUrl) pushImageToJarvis(itemCode, imageUrl)
-    return imageUrl
+    // Both errored — don't cache, allow retry later
+    return { url: null, allErrored: true }
   } catch {
-    return null // never throw — caller handles null gracefully
+    return { url: null, allErrored: true }
   }
 }
 
@@ -200,14 +217,17 @@ export async function prefetchImages(
   for (const item of uncached) {
     if (signal?.aborted) break
     try {
-      const url = await fetchAndCacheImage(item.itemCode, item.description, item.department, item.barcode)
+      const result = await fetchAndCacheImage(item.itemCode, item.description, item.department, item.barcode)
       done++
-      if (url) {
+      if (result.url) {
         found++
         consecutiveErrors = 0
-      } else {
-        consecutiveErrors++
+      } else if (result.allErrored) {
         errors++
+        consecutiveErrors++
+      } else {
+        // No image found but search worked — not an error
+        consecutiveErrors = 0
       }
     } catch {
       done++
