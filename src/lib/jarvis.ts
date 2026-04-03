@@ -191,8 +191,8 @@ export interface StockItem {
   avgCost: number
   onOrder: number
   isOnReorder: boolean
-  avgDayQty: number
-  avgWeekQty: number
+  avgDayQty: number | null
+  avgWeekQty: number | null
 }
 
 export interface LivePromotion {

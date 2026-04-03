@@ -216,7 +216,7 @@ export default function LiveStockView() {
         sorted.sort((a, b) => a.department.localeCompare(b.department) || a.description.localeCompare(b.description))
         break
       case 'velocity':
-        sorted.sort((a, b) => b.avgDayQty - a.avgDayQty)
+        sorted.sort((a, b) => (b.avgDayQty ?? 0) - (a.avgDayQty ?? 0))
         break
       case 'name':
         sorted.sort((a, b) => a.description.localeCompare(b.description))
@@ -289,7 +289,7 @@ export default function LiveStockView() {
                 Sell ${fmtMoney(item.sellPrice)}
               </span>
               <span className="text-[10px] text-gray-400">
-                Avg/day {item.avgDayQty.toFixed(1)}
+                Avg/day {(item.avgDayQty ?? 0).toFixed(1)}
               </span>
             </div>
           </div>

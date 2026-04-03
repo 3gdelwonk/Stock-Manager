@@ -476,13 +476,13 @@ export default function ProductsView({ initialAction, onActionConsumed }: Produc
       const localQoh = product.id ? latestQoh.get(product.id) : undefined
       const liveQoh = live?.onHand
       const effectiveQoh = liveQoh ?? localQoh
-      const vel = live?.avgDayQty ?? perf?.velocity ?? 0
+      const vel = (live?.avgDayQty ?? null) !== null ? live!.avgDayQty! : (perf?.velocity ?? 0)
 
       return {
         product,
         localQoh,
         liveQoh,
-        liveVelocity: live?.avgDayQty ?? 0,
+        liveVelocity: live?.avgDayQty ?? 0,  // null coalesces to 0
         onOrder: live?.onOrder ?? 0,
         reorderLevel: live?.reorderLevel ?? product.minStockLevel,
         perf,

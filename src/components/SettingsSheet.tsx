@@ -73,7 +73,7 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
       const stock = await getStockLevels({ limit: 5000 })
       // Fetch ALL stock (not department-filtered), sort by avg daily qty descending (high velocity first)
       const allItems = stock
-        .sort((a, b) => b.avgDayQty - a.avgDayQty)
+        .sort((a, b) => (b.avgDayQty ?? 0) - (a.avgDayQty ?? 0))
         .map(s => ({ itemCode: s.itemCode, description: s.description, department: s.department, barcode: s.barcode }))
       await prefetchImages(allItems, setPrefetchProgress, controller.signal)
     } catch { /* aborted or error */ }
