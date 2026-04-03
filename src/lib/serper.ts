@@ -120,15 +120,27 @@ export function resetSerperUsage(): void {
   localStorage.setItem('grocery-manager-serper-usage', JSON.stringify(fresh))
 }
 
-// ── Tier Size ──────────────────────────────────────────────────────────────
+// ── Queue-Based Serper Tracking (IndexedDB) ───────────────────────────────
+// Products are searched with Serper once in priority order, then marked "done"
+// so they're never re-searched. This makes the backfill self-terminating.
 
-export function getSerperTierSize(): number {
-  const raw = localStorage.getItem('grocery-manager-serper-tier-size')
-  return raw ? parseInt(raw, 10) || 1000 : 1000
+import { db } from './db'
+
+export async function isSerperSearched(itemCode: string): Promise<boolean> {
+  const entry = await db.serperSearched.get(itemCode)
+  return !!entry
 }
 
-export function setSerperTierSize(n: number): void {
-  localStorage.setItem('grocery-manager-serper-tier-size', String(n))
+export async function markSerperSearched(itemCode: string): Promise<void> {
+  await db.serperSearched.put({ itemCode })
+}
+
+export async function getSerperSearchedCount(): Promise<number> {
+  return db.serperSearched.count()
+}
+
+export async function clearSerperSearched(): Promise<void> {
+  await db.serperSearched.clear()
 }
 
 // ── Priority Scoring ───────────────────────────────────────────────────────

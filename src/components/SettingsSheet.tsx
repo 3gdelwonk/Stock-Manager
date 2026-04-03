@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { clearAllData } from '../lib/db'
 import { getStockLevels } from '../lib/jarvis'
-import { prefetchImages, isImageSearchConfigured, clearImageCache, clearFailedImageCache, getImageCacheStats, type PrefetchProgress } from '../lib/images'
+import { prefetchImages, isImageSearchConfigured, clearImageCache, clearFailedImageCache, clearNonSerperImageCache, getImageCacheStats, type PrefetchProgress } from '../lib/images'
 import {
   getSerperUsage, getSerperBudget, setSerperBudget, resetSerperUsage,
-  getSerperTierSize, setSerperTierSize, computeImagePriority, canUseSerper,
+  computeImagePriority, getSerperSearchedCount, clearSerperSearched,
   type SerperUsage, type SerperBudget,
 } from '../lib/serper'
 import ImportView from './ImportView'
@@ -52,9 +52,12 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
   // Serper budget state
   const [usage, setUsage] = useState<SerperUsage>(() => getSerperUsage())
   const [budget, setBudget] = useState<SerperBudget>(() => getSerperBudget())
-  const [tierSize, setTierSizeState] = useState(() => getSerperTierSize())
+  const [serperSearchedCount, setSerperSearchedCount] = useState(0)
 
-  useEffect(() => { getImageCacheStats().then(setCacheStats) }, [])
+  useEffect(() => {
+    getImageCacheStats().then(setCacheStats)
+    getSerperSearchedCount().then(setSerperSearchedCount)
+  }, [])
 
   function saveLead() {
     localStorage.setItem('grocery-manager-lead-time', String(leadTime))
@@ -92,11 +95,6 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
     setSerperBudget(next)
   }
 
-  function saveTierSize(n: number) {
-    setTierSizeState(n)
-    setSerperTierSize(n)
-  }
-
   async function handlePrefetch() {
     if (prefetching) {
       abortRef.current?.abort()
@@ -108,23 +106,21 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
     abortRef.current = controller
     try {
       const stock = await getStockLevels({ limit: 50000 })
-      const ts = getSerperTierSize()
-      const serperAvailable = canUseSerper('images')
       const allItems = stock
         .map(s => ({ ...s, _priority: computeImagePriority({ avgDayQty: s.avgDayQty, sellPrice: s.sellPrice, avgCost: s.avgCost }) }))
         .sort((a, b) => b._priority - a._priority)
-        .map((s, i) => ({
+        .map(s => ({
           itemCode: s.itemCode, description: s.description, department: s.department, barcode: s.barcode,
-          searchTier: (serperAvailable && i < ts ? 'serper' : 'ddg') as 'serper' | 'ddg',
         }))
       await prefetchImages(allItems, (p) => {
         setPrefetchProgress(p)
-        // Refresh usage display during prefetch
         setUsage(getSerperUsage())
+        getSerperSearchedCount().then(setSerperSearchedCount)
       }, controller.signal)
     } catch { /* aborted or error */ }
     setPrefetching(false)
     setUsage(getSerperUsage())
+    getSerperSearchedCount().then(setSerperSearchedCount)
   }
 
   async function handleClear() {
@@ -279,22 +275,28 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
                     Budget sum ({budgetSum}) exceeds plan limit ({budget.monthlyLimit})
                   </p>
                 )}
-                <div className="flex items-center gap-2">
-                  <div className="flex-1">
-                    <label className="text-[9px] text-gray-400">Serper Tier (top products)</label>
-                    <input type="number" min={0} max={5000} value={tierSize}
-                      onChange={e => saveTierSize(Number(e.target.value) || 1000)}
-                      className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center" />
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] font-medium text-gray-600">Serper Searched</span>
+                    <p className="text-[9px] text-gray-400">{serperSearchedCount.toLocaleString()} products done</p>
                   </div>
-                  <button
-                    onClick={() => { resetSerperUsage(); setUsage(getSerperUsage()) }}
-                    className="mt-3 px-2 py-1 text-[10px] text-gray-400 hover:text-red-500 transition-colors"
-                  >
-                    Reset Usage
-                  </button>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={async () => { await clearSerperSearched(); setSerperSearchedCount(0) }}
+                      className="px-2 py-1 text-[10px] text-gray-400 hover:text-amber-600 transition-colors"
+                    >
+                      Reset Queue
+                    </button>
+                    <button
+                      onClick={() => { resetSerperUsage(); setUsage(getSerperUsage()) }}
+                      className="px-2 py-1 text-[10px] text-gray-400 hover:text-red-500 transition-colors"
+                    >
+                      Reset Usage
+                    </button>
+                  </div>
                 </div>
                 <p className="text-[9px] text-gray-400">
-                  Top {tierSize} products by margin get Serper images. Rest use DDG (free).
+                  Products are Serper-searched in priority order (margin × velocity). Each product is searched once then marked done.
                 </p>
               </div>
             </div>
@@ -395,13 +397,21 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
               Retry Not-Found{cacheStats ? ` (${cacheStats.failed})` : ''}
             </button>
             <button
+              onClick={async () => { const n = await clearNonSerperImageCache(); setCacheStats(await getImageCacheStats()); alert(`Cleared ${n} DDG images. They will be re-populated through Serper on next prefetch.`) }}
+              className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-blue-50 text-blue-600 hover:bg-blue-100"
+            >
+              Clear DDG Images
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
               onClick={async () => { const n = await clearImageCache(); setCacheStats({ total: 0, found: 0, failed: 0 }); alert(`Cleared local cache (${n} entries). JARVISmart images are safe — they will be re-downloaded on next fetch.`) }}
               className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200"
             >
-              Clear Local{cacheStats ? ` (${cacheStats.total})` : ''}
+              Clear All Local{cacheStats ? ` (${cacheStats.total})` : ''}
             </button>
           </div>
-          <p className="text-[10px] text-gray-400">Local cache only — JARVISmart server images are never deleted.</p>
+          <p className="text-[10px] text-gray-400">Local cache only — JARVISmart server images are never deleted. "Clear DDG" removes non-Serper images for re-population.</p>
         </div>
 
         <div className="border-t border-gray-100 pt-4">

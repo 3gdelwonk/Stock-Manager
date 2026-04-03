@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════
 
 import { db } from './db'
-import { serperImageSearch, serperImageSearchMulti, canUseSerper } from './serper'
+import { serperImageSearch, serperImageSearchMulti, canUseSerper, isSerperSearched, markSerperSearched } from './serper'
 
 // ── Config helpers ──────────────────────────────────────────────────────────
 
@@ -107,15 +107,14 @@ export async function deleteCachedImage(itemCode: string): Promise<void> {
 }
 
 // ── Fetch & cache (used by bulk prefetch + single refetch) ─────────────────
-// searchTier controls which engine to use during prefetch:
-//   'serper' → Serper first (budget-gated), DDG fallback
-//   'ddg'    → DDG only, skip Serper
-//   undefined → use manual search priority toggle (for picker/refetch)
+// Queue-based: if item hasn't been Serper-searched yet AND budget allows → Serper first, DDG fallback
+// If already Serper-searched or no budget → DDG only
+// manual=true → use manual search priority toggle (for picker/refetch)
 
 export async function fetchAndCacheImage(
   itemCode: string, description: string, department: string,
   barcode?: string | null,
-  searchTier?: 'serper' | 'ddg',
+  manual?: boolean,
 ): Promise<{ url: string | null; allErrored: boolean }> {
   try {
     const cached = await getCachedImageUrl(itemCode)
@@ -139,26 +138,30 @@ export async function fetchAndCacheImage(
     const trySerper = async () => {
       const r = await serperImageSearch(buildSearchQuery(description, department))
       if (r !== 'error') { anySearchWorked = true; if (r) imageUrl = r }
-      // Barcode retry only for manual picker (no searchTier), not bulk prefetch
-      if (!imageUrl && barcode && !searchTier) {
+      // Barcode retry only for manual picker, not bulk prefetch
+      if (!imageUrl && barcode && manual) {
         const r2 = await serperImageSearch(buildSearchQuery(description, department, barcode))
         if (r2 !== 'error') { anySearchWorked = true; if (r2) imageUrl = r2 }
       }
+      // Mark as Serper-searched regardless of result
+      await markSerperSearched(itemCode)
     }
 
-    // 2 & 3. Search based on tier or manual priority
-    if (searchTier === 'serper') {
-      // Two-tier prefetch: Serper first (if budget allows), DDG fallback
-      if (canUseSerper('images')) await trySerper()
-      if (!imageUrl) await tryDdg()
-    } else if (searchTier === 'ddg') {
-      // DDG only — skip Serper to save budget
-      await tryDdg()
-    } else {
+    // 2 & 3. Decide search strategy
+    if (manual) {
       // Manual picker / refetch — use priority toggle
       const [primary, fallback] = getSearchPriority() === 'serper' ? [trySerper, tryDdg] : [tryDdg, trySerper]
       await primary()
       if (!imageUrl) await fallback()
+    } else {
+      // Bulk prefetch — queue-based: Serper if not yet searched + budget available
+      const alreadySearched = await isSerperSearched(itemCode)
+      if (!alreadySearched && canUseSerper('images')) {
+        await trySerper()
+        if (!imageUrl) await tryDdg()
+      } else {
+        await tryDdg()
+      }
     }
 
     if (imageUrl) {
@@ -192,7 +195,7 @@ export interface PrefetchProgress {
 }
 
 export async function prefetchImages(
-  items: { itemCode: string; description: string; department: string; barcode?: string | null; searchTier?: 'serper' | 'ddg' }[],
+  items: { itemCode: string; description: string; department: string; barcode?: string | null }[],
   onProgress?: (p: PrefetchProgress) => void,
   signal?: AbortSignal,
 ): Promise<{ fetched: number; found: number }> {
@@ -218,7 +221,7 @@ export async function prefetchImages(
   for (const item of uncached) {
     if (signal?.aborted) break
     try {
-      const result = await fetchAndCacheImage(item.itemCode, item.description, item.department, item.barcode, item.searchTier)
+      const result = await fetchAndCacheImage(item.itemCode, item.description, item.department, item.barcode)
       done++
       if (result.url) {
         found++
@@ -255,6 +258,21 @@ export async function clearFailedImageCache(): Promise<number> {
   const failed = await db.imageCache.filter(e => e.imageUrl === '').primaryKeys()
   await db.imageCache.bulkDelete(failed)
   return failed.length
+}
+
+/** Clear images that were NOT fetched via Serper — allows re-population through Serper.
+ *  Keeps JARVISmart pre-populated images (they'll be re-fetched from server anyway)
+ *  and empty (not-found) entries. Removes DDG-sourced local cache entries. */
+export async function clearNonSerperImageCache(): Promise<number> {
+  const all = await db.imageCache.toArray()
+  const toDelete: string[] = []
+  for (const entry of all) {
+    if (!entry.imageUrl) continue // skip not-found entries
+    const searched = await isSerperSearched(entry.itemCode)
+    if (!searched) toDelete.push(entry.itemCode) // not Serper-searched → DDG image → clear it
+  }
+  if (toDelete.length > 0) await db.imageCache.bulkDelete(toDelete)
+  return toDelete.length
 }
 
 export async function getImageCacheStats(): Promise<{ total: number; found: number; failed: number }> {

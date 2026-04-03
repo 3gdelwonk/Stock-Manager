@@ -11,6 +11,10 @@ export interface ImageCacheEntry {
   fetchedAt: Date
 }
 
+export interface SerperSearchedEntry {
+  itemCode: string
+}
+
 class GroceryManagerDB extends Dexie {
   products!: EntityTable<Product, 'id'>
   stockSnapshots!: EntityTable<StockSnapshot, 'id'>
@@ -23,6 +27,7 @@ class GroceryManagerDB extends Dexie {
   importLog!: EntityTable<ImportLogEntry, 'id'>
   imageCache!: EntityTable<ImageCacheEntry, 'itemCode'>
   promoROICache!: EntityTable<PromoROICacheEntry, 'id'>
+  serperSearched!: EntityTable<SerperSearchedEntry, 'itemCode'>
 
   constructor() {
     super('GroceryManagerDB')
@@ -41,6 +46,9 @@ class GroceryManagerDB extends Dexie {
     this.version(2).stores({
       promoROICache:  '++id, itemCode, [itemCode+promoStart]',
     })
+    this.version(3).stores({
+      serperSearched: 'itemCode',
+    })
   }
 }
 
@@ -50,13 +58,13 @@ export async function clearAllData(): Promise<void> {
   await db.transaction('rw', [
     db.products, db.stockSnapshots, db.salesRecords, db.promotions,
     db.expiryBatches, db.wasteLog, db.trackedItems, db.trackedPromos,
-    db.importLog, db.imageCache, db.promoROICache,
+    db.importLog, db.imageCache, db.promoROICache, db.serperSearched,
   ], async () => {
     await Promise.all([
       db.products.clear(), db.stockSnapshots.clear(), db.salesRecords.clear(),
       db.promotions.clear(), db.expiryBatches.clear(), db.wasteLog.clear(),
       db.trackedItems.clear(), db.trackedPromos.clear(), db.importLog.clear(),
-      db.imageCache.clear(), db.promoROICache.clear(),
+      db.imageCache.clear(), db.promoROICache.clear(), db.serperSearched.clear(),
     ])
   })
 }

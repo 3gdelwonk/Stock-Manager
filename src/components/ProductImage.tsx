@@ -198,9 +198,16 @@ export default function ProductImage({ itemCode, description, department, barcod
   }
 
   function startLongPress() {
+    // For expanded images (≥80px), show actions immediately on tap
+    // For small images, require long-press (400ms, reduced from 600ms)
+    const delay = size >= 80 ? 0 : 400
+    if (delay === 0) {
+      setShowActions(prev => !prev) // toggle on tap for large images
+      return
+    }
     longPressTimer.current = setTimeout(() => {
       setShowActions(true)
-    }, 600)
+    }, delay)
   }
 
   function cancelLongPress() {
@@ -233,21 +240,25 @@ export default function ProductImage({ itemCode, description, department, barcod
     )
   }
 
+  const isLarge = size >= 80
+  const btnSize = isLarge ? 18 : 12
+  const btnPad = isLarge ? 'p-2' : 'p-1'
+
   const actionButtons = showActions && (
-    <div className="absolute -top-1 -right-1 z-10 flex flex-col gap-0.5">
+    <div className={`absolute ${isLarge ? '-top-2 -right-2' : '-top-1 -right-1'} z-10 flex flex-col gap-1`}>
       <button
         onClick={handleRefetch}
-        className="bg-emerald-600 text-white rounded-full p-1 shadow-lg"
+        className={`bg-emerald-600 text-white rounded-full ${btnPad} shadow-lg active:scale-95 transition-transform`}
         title="Re-fetch image"
       >
-        <RefreshCw size={12} />
+        <RefreshCw size={btnSize} />
       </button>
       <button
         onClick={handleChoose}
-        className="bg-blue-600 text-white rounded-full p-1 shadow-lg"
+        className={`bg-blue-600 text-white rounded-full ${btnPad} shadow-lg active:scale-95 transition-transform`}
         title="Choose image"
       >
-        <Search size={12} />
+        <Search size={btnSize} />
       </button>
     </div>
   )
