@@ -1,9 +1,10 @@
 // ═══════════════════════════════════════════════
-// Serper API — Budget Tracking & Query Management
-// Tracks usage by type (images/shopping/other) with monthly auto-reset
+// Server-Side Search API — via JARVISmart proxy
+// Images: /api/pos/serper-images (Serper.dev)
+// Shopping: /api/pos/serpapi/shopping (SerpApi)
+// Research: /api/pos/serpapi/research (SerpApi)
+// Budget tracking for client-side awareness only
 // ═══════════════════════════════════════════════
-
-const DEFAULT_SERPER_KEY = '75b23242598b5ef681209b443ae89c9a04e09ca6379e4c32768a56600be80d2d'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -23,40 +24,52 @@ export interface SerperBudget {
   other: number
 }
 
-export interface SerperShoppingResult {
+// Response types from JARVISmart server endpoints
+export interface ServerImageResult {
+  title: string; imageUrl: string; thumbnailUrl: string; width: number; height: number; source: string
+}
+
+export interface ShoppingResult {
   title: string
-  source: string
   price: number
+  priceText: string
+  source: string
   link: string
-  rating?: number
-  delivery?: string
-  imageUrl?: string
+  thumbnail: string
+  rating: number | null
+  reviews: number
+  delivery: string
 }
 
-interface SerperImageResult {
-  title: string; imageUrl: string; imageWidth: number; imageHeight: number; source: string; domain: string
+export interface ResearchResult {
+  query: string
+  knowledgeGraph: { see_results_about?: Array<{ name: string; link: string; image: string }> } | null
+  peopleAlsoAsk: Array<{ question: string; snippet: string; link: string }>
+  relatedSearches: string[]
+  organicResults: Array<{ title: string; link: string; snippet: string; source: string }>
 }
-interface SerperImageResponse { images?: SerperImageResult[]; message?: string }
-interface SerperShoppingResponse { shopping?: Array<{ title: string; source: string; price: string; link: string; rating?: number; delivery?: string; imageUrl?: string }>; message?: string }
 
-// ── Placeholder filter (shared with images.ts) ────────────────────────────
+// ── Config helpers ────────────────────────────────────────────────────────
+
+function getJarvisBaseUrl(): string {
+  return localStorage.getItem('grocery-manager-jarvis-url') || (import.meta.env.VITE_JARVIS_URL as string) || 'https://api.jarvismart196410.uk'
+}
+function getJarvisApiKey(): string {
+  return localStorage.getItem('grocery-manager-jarvis-key') || (import.meta.env.VITE_JARVIS_API_KEY as string) || 'jmart_sk_7f3a9c2e1b4d8f6a0e5c3b9d'
+}
+
+// ── Placeholder filter ───────────────────────────────────────────────────
 
 const PLACEHOLDER_RE = /placeholder|no-?image|default[-_]image|spacer|1x1\.|pixel\.gif/i
 const STOCK_PHOTO_RE = /shutterstock|istockphoto|gettyimages|depositphotos/i
 
-function isPlaceholderUrl(url: string): boolean {
+export function isPlaceholderUrl(url: string): boolean {
   return PLACEHOLDER_RE.test(url) || STOCK_PHOTO_RE.test(url)
 }
 
-// ── Config ─────────────────────────────────────────────────────────────────
-
-export function getSerperApiKey(): string {
-  return localStorage.getItem('grocery-manager-serper-api-key') || (import.meta.env.VITE_SERPER_API_KEY as string) || DEFAULT_SERPER_KEY
-}
+// ── Budget Management (client-side tracking) ──────────────────────────────
 
 const DEFAULT_BUDGET: SerperBudget = { monthlyLimit: 5000, images: 1000, shopping: 3500, other: 500 }
-
-// ── Budget Management ──────────────────────────────────────────────────────
 
 function getCurrentMonth(): string {
   const d = new Date()
@@ -71,7 +84,6 @@ export function getSerperUsage(): SerperUsage {
       if (usage.month === getCurrentMonth()) return usage
     } catch { /* corrupted, reset */ }
   }
-  // New month or no data — reset
   const fresh: SerperUsage = { month: getCurrentMonth(), images: 0, shopping: 0, other: 0 }
   localStorage.setItem('grocery-manager-serper-usage', JSON.stringify(fresh))
   return fresh
@@ -121,8 +133,6 @@ export function resetSerperUsage(): void {
 }
 
 // ── Queue-Based Serper Tracking (IndexedDB) ───────────────────────────────
-// Products are searched with Serper once in priority order, then marked "done"
-// so they're never re-searched. This makes the backfill self-terminating.
 
 import { db } from './db'
 
@@ -149,75 +159,70 @@ export function computeImagePriority(item: { avgDayQty: number | null; sellPrice
   return (item.avgDayQty ?? 0) * Math.max(0, item.sellPrice - item.avgCost)
 }
 
-// ── Serper Image Search ────────────────────────────────────────────────────
+// ── Server-Side Image Search (via JARVISmart → Serper.dev) ────────────────
 
-export async function serperImageSearch(query: string): Promise<string | null | 'error'> {
-  const apiKey = getSerperApiKey()
-  if (!apiKey) return 'error'
+export async function serverImageSearch(query: string, num = 10): Promise<ServerImageResult[]> {
+  try {
+    const params = new URLSearchParams({ q: query, num: String(num) })
+    const res = await fetch(`${getJarvisBaseUrl()}/api/pos/serper-images?${params}`, {
+      headers: { 'X-API-Key': getJarvisApiKey() },
+    })
+    if (!res.ok) return []
+    trackSerperQuery('images')
+    const data: { results: ServerImageResult[] } = await res.json()
+    return data.results ?? []
+  } catch { return [] }
+}
+
+/** Single best image from server-side Serper search */
+export async function serverImageSearchBest(query: string): Promise<string | null | 'error'> {
   if (!canUseSerper('images')) return 'error'
   try {
-    const res = await fetch('https://google.serper.dev/images', {
-      method: 'POST',
-      headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: query, num: 10 }),
-    })
-    if (!res.ok) return 'error'
-    trackSerperQuery('images')
-    const data: SerperImageResponse = await res.json()
-    if (!data.images || data.images.length === 0) return null
-    const img = data.images.find(i => i.imageWidth >= 100 && i.imageHeight >= 100 && !isPlaceholderUrl(i.imageUrl))
-    return img?.imageUrl ?? data.images[0]?.imageUrl ?? null
+    const results = await serverImageSearch(query, 10)
+    if (results.length === 0) return null
+    const img = results.find(i => i.width >= 100 && i.height >= 100 && !isPlaceholderUrl(i.imageUrl))
+    return img?.imageUrl ?? results[0]?.imageUrl ?? null
   } catch { return 'error' }
 }
 
-// ── Serper Image Search (multi-result for manual picker) ───────────────────
-
-export interface SerperImageOption {
+/** Multi-result for manual image picker */
+export interface ServerImageOption {
   imageUrl: string; title: string; source: string; width: number; height: number
 }
 
-export async function serperImageSearchMulti(query: string, num = 10): Promise<SerperImageOption[]> {
-  const apiKey = getSerperApiKey()
-  if (!apiKey || !canUseSerper('images')) return []
-  try {
-    const res = await fetch('https://google.serper.dev/images', {
-      method: 'POST',
-      headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: query, num }),
-    })
-    if (!res.ok) return []
-    trackSerperQuery('images')
-    const data: SerperImageResponse = await res.json()
-    if (!data.images) return []
-    return data.images
-      .filter(i => i.imageWidth >= 80 && i.imageHeight >= 80 && !isPlaceholderUrl(i.imageUrl))
-      .map(i => ({ imageUrl: i.imageUrl, title: i.title, source: i.domain, width: i.imageWidth, height: i.imageHeight }))
-  } catch { return [] }
+export async function serverImageSearchMulti(query: string, num = 10): Promise<ServerImageOption[]> {
+  if (!canUseSerper('images')) return []
+  const results = await serverImageSearch(query, num)
+  return results
+    .filter(i => i.width >= 80 && i.height >= 80 && !isPlaceholderUrl(i.imageUrl))
+    .map(i => ({ imageUrl: i.imageUrl, title: i.title, source: i.source, width: i.width, height: i.height }))
 }
 
-// ── Serper Shopping Search ─────────────────────────────────────────────────
+// ── Server-Side Shopping Search (via JARVISmart → SerpApi) ────────────────
 
-export async function serperShoppingSearch(query: string, num = 10): Promise<SerperShoppingResult[]> {
-  const apiKey = getSerperApiKey()
-  if (!apiKey || !canUseSerper('shopping')) return []
+export async function serverShoppingSearch(query: string): Promise<ShoppingResult[]> {
   try {
-    const res = await fetch('https://google.serper.dev/shopping', {
-      method: 'POST',
-      headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q: query, num, gl: 'au' }),
+    const params = new URLSearchParams({ q: query })
+    const res = await fetch(`${getJarvisBaseUrl()}/api/pos/serpapi/shopping?${params}`, {
+      headers: { 'X-API-Key': getJarvisApiKey() },
     })
     if (!res.ok) return []
     trackSerperQuery('shopping')
-    const data: SerperShoppingResponse = await res.json()
-    if (!data.shopping) return []
-    return data.shopping.map(s => ({
-      title: s.title,
-      source: s.source,
-      price: parseFloat(String(s.price).replace(/[^0-9.]/g, '')) || 0,
-      link: s.link,
-      rating: s.rating,
-      delivery: s.delivery,
-      imageUrl: s.imageUrl,
-    }))
+    const data: { query: string; results: ShoppingResult[] } = await res.json()
+    return data.results ?? []
   } catch { return [] }
+}
+
+// ── Server-Side Research Search (via JARVISmart → SerpApi) ────────────────
+
+export async function serverResearchSearch(query: string): Promise<ResearchResult | null> {
+  try {
+    const params = new URLSearchParams({ q: query })
+    const res = await fetch(`${getJarvisBaseUrl()}/api/pos/serpapi/research?${params}`, {
+      headers: { 'X-API-Key': getJarvisApiKey() },
+    })
+    if (!res.ok) return null
+    trackSerperQuery('other')
+    return await res.json() as ResearchResult
+  } catch { return null }
 }

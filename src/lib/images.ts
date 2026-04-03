@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════════
 // Product Image Service — Grocery Manager
-// Priority: local IndexedDB cache → JARVISmart server → Serper (Google)
+// Priority: local IndexedDB cache → JARVISmart server DB → Serper via JARVISmart proxy
 // ═══════════════════════════════════════════════
 
 import { db } from './db'
-import { serperImageSearch, serperImageSearchMulti, canUseSerper, markSerperSearched } from './serper'
+import { serverImageSearchBest, serverImageSearchMulti, canUseSerper, markSerperSearched } from './serper'
 
 // ── Config helpers ──────────────────────────────────────────────────────────
 
@@ -70,7 +70,7 @@ export async function deleteCachedImage(itemCode: string): Promise<void> {
 }
 
 // ── Fetch & cache (used by bulk prefetch + single refetch) ─────────────────
-// Serper only — no DDG fallback. JARVISmart server checked first (pre-populated).
+// Server-side Serper via JARVISmart proxy. No client-side API keys.
 
 export async function fetchAndCacheImage(
   itemCode: string, description: string, department: string,
@@ -80,7 +80,7 @@ export async function fetchAndCacheImage(
     const cached = await getCachedImageUrl(itemCode)
     if (cached !== null) return { url: cached || null, allErrored: false }
 
-    // 1. Check JARVISmart server
+    // 1. Check JARVISmart server DB (pre-populated images)
     const jarvisUrl = await getJarvisImage(itemCode)
     if (jarvisUrl) {
       await db.imageCache.put({ itemCode, imageUrl: jarvisUrl, fetchedAt: new Date() })
@@ -88,7 +88,7 @@ export async function fetchAndCacheImage(
       return { url: jarvisUrl, allErrored: false }
     }
 
-    // 2. Serper image search (budget-gated)
+    // 2. Serper image search via JARVISmart proxy (budget-gated)
     if (!canUseSerper('images')) {
       return { url: null, allErrored: true }
     }
@@ -96,12 +96,12 @@ export async function fetchAndCacheImage(
     let imageUrl: string | null = null
     let anySearchWorked = false
 
-    const r = await serperImageSearch(buildSearchQuery(description, department))
+    const r = await serverImageSearchBest(buildSearchQuery(description, department))
     if (r !== 'error') { anySearchWorked = true; if (r) imageUrl = r }
 
     // Barcode retry if first attempt found nothing
     if (!imageUrl && barcode) {
-      const r2 = await serperImageSearch(buildSearchQuery(description, department, barcode))
+      const r2 = await serverImageSearchBest(buildSearchQuery(description, department, barcode))
       if (r2 !== 'error') { anySearchWorked = true; if (r2) imageUrl = r2 }
     }
 
@@ -210,7 +210,7 @@ export async function getImageCacheStats(): Promise<{ total: number; found: numb
   return { total: all.length, found, failed: all.length - found }
 }
 
-// ── Manual image picker (Serper only) ─────────────────────────────────────
+// ── Manual image picker (Serper via JARVISmart proxy) ─────────────────────
 
 export interface ImageOption { imageUrl: string; title: string; source: string; width: number; height: number }
 
@@ -224,7 +224,7 @@ export async function searchProductImages(
 
   const queries = [buildSearchQuery(description, department), ...(barcode ? [buildSearchQuery(description, department, barcode)] : [])]
   for (const query of queries) {
-    const imgs = await serperImageSearchMulti(query, 10)
+    const imgs = await serverImageSearchMulti(query, 10)
     for (const img of imgs) {
       if (!seen.has(img.imageUrl)) {
         seen.add(img.imageUrl)

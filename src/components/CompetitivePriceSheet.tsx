@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, ExternalLink, Loader2, TrendingDown, TrendingUp, Minus } from 'lucide-react'
 import { getOnlinePrices, type OnlinePrice } from '../lib/jarvis'
-import { serperShoppingSearch } from '../lib/serper'
+import { serverShoppingSearch } from '../lib/serper'
 
 interface CompetitivePriceSheetProps {
   open: boolean
@@ -29,14 +29,14 @@ export default function CompetitivePriceSheet({
     setError(null)
     setResults([])
     try {
-      // Serper Shopping (budget-gated) + JARVISmart in parallel
+      // SerpApi Shopping (via JARVISmart) + JARVISmart online prices in parallel
       const [shopResults, jarvisData] = await Promise.all([
-        serperShoppingSearch(description).catch(() => []),
+        serverShoppingSearch(description).catch(() => []),
         getOnlinePrices(description).catch(() => ({ results: [] as OnlinePrice[] })),
       ])
       const seen = new Set<string>()
       const merged: OnlinePrice[] = []
-      // Serper results first (fresher, structured)
+      // SerpApi results first (fresher, structured)
       for (const s of shopResults) {
         const key = `${s.source}|${s.title}`.toLowerCase()
         if (!seen.has(key) && s.price > 0) {

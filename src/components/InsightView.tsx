@@ -12,7 +12,7 @@ import {
   checkConnection, getTrends, getHourlySales, getTopSellers, getOnlinePrices,
   type TrendEntry, type HourlySalesEntry, type TopSeller, type OnlinePrice,
 } from '../lib/jarvis'
-import { serperShoppingSearch } from '../lib/serper'
+import { serverShoppingSearch, serverResearchSearch, type ResearchResult } from '../lib/serper'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../lib/db'
 
@@ -130,6 +130,11 @@ export default function InsightView() {
   const [scanProgress, setScanProgress] = useState(0)
   const [scanTotal, setScanTotal] = useState(0)
   const [competitorResults, setCompetitorResults] = useState<CompetitorResult[]>([])
+
+  // ── Research state ──
+  const [researchQuery, setResearchQuery] = useState('')
+  const [researching, setResearching] = useState(false)
+  const [researchResult, setResearchResult] = useState<ResearchResult | null>(null)
 
   // ── Notes state ──
   const [notes, setNotes] = useState<IntelNote[]>(loadNotes)
@@ -333,13 +338,13 @@ export default function InsightView() {
     const results: CompetitorResult[] = []
     for (const seller of top5) {
       try {
-        // Serper Shopping (budget-gated) + JARVISmart in parallel
+        // SerpApi Shopping (via JARVISmart) + JARVISmart online prices in parallel
         const [shopResults, data] = await Promise.all([
-          serperShoppingSearch(seller.description).catch(() => []),
+          serverShoppingSearch(seller.description).catch(() => []),
           getOnlinePrices(seller.description).catch(() => ({ results: [] as OnlinePrice[] })),
         ])
 
-        // Merge: Serper shopping results first, then JARVISmart
+        // Merge: SerpApi results first, then JARVISmart
         const seen = new Set<string>()
         const priceResults: OnlinePrice[] = []
         for (const s of shopResults) {
@@ -405,6 +410,18 @@ export default function InsightView() {
     setNotes(updated)
     saveNotes(updated)
   }, [notes])
+
+  // ── Product research ──
+  const runResearch = useCallback(async (query: string) => {
+    if (!query.trim()) return
+    setResearching(true)
+    setResearchResult(null)
+    try {
+      const result = await serverResearchSearch(query.trim())
+      setResearchResult(result)
+    } catch { /* ignore */ }
+    setResearching(false)
+  }, [])
 
   // ── Upcoming holidays ──
   const upcomingHolidays = useMemo(() => {
@@ -741,7 +758,126 @@ export default function InsightView() {
         </div>
       </div>
 
-      {/* ═══ Section 6: Intel Notes ═══ */}
+      {/* ═══ Section 6: Product Intelligence ═══ */}
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+          <Search className="w-4 h-4 text-emerald-600" />
+          <h3 className="text-sm font-semibold text-gray-900">Product Intelligence</h3>
+        </div>
+        <div className="p-4 space-y-3">
+          <form
+            onSubmit={e => { e.preventDefault(); runResearch(researchQuery) }}
+            className="flex gap-2"
+          >
+            <input
+              type="text"
+              value={researchQuery}
+              onChange={e => setResearchQuery(e.target.value)}
+              placeholder="Search product trends, competitors, FAQs..."
+              className="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent placeholder:text-gray-400"
+            />
+            <button
+              type="submit"
+              disabled={researching || !researchQuery.trim()}
+              className="flex items-center gap-1 px-3 py-2 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {researching ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+              Research
+            </button>
+          </form>
+
+          {/* Quick research from top sellers */}
+          {!researchResult && !researching && topSellers7d.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              <span className="text-[10px] text-gray-400">Quick:</span>
+              {topSellers7d.slice(0, 4).map(s => (
+                <button
+                  key={s.itemCode}
+                  onClick={() => { setResearchQuery(s.description); runResearch(s.description) }}
+                  className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 hover:bg-emerald-100 hover:text-emerald-700 transition-colors truncate max-w-[140px]"
+                >
+                  {s.description}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {researching && (
+            <div className="flex flex-col items-center py-6 gap-2">
+              <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+              <p className="text-xs text-gray-500">Researching...</p>
+            </div>
+          )}
+
+          {researchResult && !researching && (
+            <div className="space-y-3">
+              {/* People Also Ask */}
+              {researchResult.peopleAlsoAsk.length > 0 && (
+                <div>
+                  <h4 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">People Also Ask</h4>
+                  <div className="space-y-1.5">
+                    {researchResult.peopleAlsoAsk.map((paa, i) => (
+                      <div key={i} className="rounded-lg bg-blue-50 border border-blue-100 p-2.5">
+                        <p className="text-xs font-medium text-gray-900">{paa.question}</p>
+                        {paa.snippet && <p className="text-[11px] text-gray-600 mt-1">{paa.snippet}</p>}
+                        {paa.link && (
+                          <a href={paa.link} target="_blank" rel="noopener noreferrer" className="text-[10px] text-blue-600 hover:underline mt-1 inline-block">
+                            Source →
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Organic Results (Coles, Woolworths, etc.) */}
+              {researchResult.organicResults.length > 0 && (
+                <div>
+                  <h4 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Market Presence</h4>
+                  <div className="space-y-1.5">
+                    {researchResult.organicResults.map((r, i) => (
+                      <a
+                        key={i}
+                        href={r.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block rounded-lg border border-gray-100 p-2.5 hover:border-emerald-200 hover:bg-emerald-50/30 transition-colors"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-medium text-gray-900 truncate flex-1">{r.title}</p>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600 shrink-0">{r.source}</span>
+                        </div>
+                        {r.snippet && <p className="text-[11px] text-gray-500 mt-1 line-clamp-2">{r.snippet}</p>}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Related Searches */}
+              {researchResult.relatedSearches.length > 0 && (
+                <div>
+                  <h4 className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1.5">Related Searches</h4>
+                  <div className="flex flex-wrap gap-1.5">
+                    {researchResult.relatedSearches.map((s, i) => (
+                      <button
+                        key={i}
+                        onClick={() => { setResearchQuery(s); runResearch(s) }}
+                        className="text-[10px] px-2 py-1 rounded-full bg-gray-100 text-gray-600 hover:bg-emerald-100 hover:text-emerald-700 transition-colors"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ═══ Section 7: Intel Notes ═══ */}
       <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
           <MessageSquare className="w-4 h-4 text-emerald-600" />

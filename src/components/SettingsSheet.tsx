@@ -31,9 +31,6 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [jarvisKey, setJarvisKey] = useState(
     () => localStorage.getItem('grocery-manager-jarvis-key') ?? (import.meta.env.VITE_JARVIS_API_KEY as string) ?? ''
   )
-  const [serperApiKey, setSerperApiKey] = useState(
-    () => localStorage.getItem('grocery-manager-serper-api-key') ?? (import.meta.env.VITE_SERPER_API_KEY as string) ?? ''
-  )
   const [expiryRed, setExpiryRed] = useState(() => {
     return parseInt(localStorage.getItem('grocery-manager-expiry-red') ?? '3', 10)
   })
@@ -69,14 +66,6 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
     } else {
       localStorage.removeItem('grocery-manager-jarvis-url')
       localStorage.removeItem('grocery-manager-jarvis-key')
-    }
-  }
-
-  function saveSerper() {
-    if (serperApiKey.trim()) {
-      localStorage.setItem('grocery-manager-serper-api-key', serperApiKey.trim())
-    } else {
-      localStorage.removeItem('grocery-manager-serper-api-key')
     }
   }
 
@@ -191,21 +180,11 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="space-y-2">
-          <label className="text-sm font-medium text-gray-700">Serper.dev API Key</label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={serperApiKey}
-              onChange={(e) => setSerperApiKey(e.target.value)}
-              placeholder="Serper API Key"
-              className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
-            />
-            <button onClick={saveSerper} className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg">Save</button>
-          </div>
+          <label className="text-sm font-medium text-gray-700">Search API Usage</label>
+          <p className="text-xs text-gray-400">Images &amp; shopping powered by JARVISmart server (Serper + SerpApi)</p>
 
-          {/* ── Serper Budget & Usage ── */}
-          {serperApiKey.trim() && (
-            <div className="bg-gray-50 rounded-lg p-3 space-y-3 mt-2">
+          {/* ── Budget & Usage ── */}
+          <div className="bg-gray-50 rounded-lg p-3 space-y-3 mt-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-gray-700">
                   {new Date().toLocaleString('en-AU', { month: 'long', year: 'numeric' })} — Serper Usage
@@ -299,7 +278,6 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
                 </p>
               </div>
             </div>
-          )}
 
           {isImageSearchConfigured() && (
             <div className="mt-2">
