@@ -5,7 +5,7 @@
 
 import { db } from './db'
 
-const DEFAULT_SERPER_KEY = '189a40fd7365625bd484571377c563e96c88820c'
+const DEFAULT_SERPER_KEY = '75b23242598b5ef681209b443ae89c9a04e09ca6379e4c32768a56600be80d2d'
 
 function getJarvisBaseUrl(): string {
   return localStorage.getItem('grocery-manager-jarvis-url') || (import.meta.env.VITE_JARVIS_URL as string) || 'https://api.jarvismart196410.uk'
