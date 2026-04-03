@@ -6,8 +6,6 @@
 import { db } from './db'
 
 const DEFAULT_SERPER_KEY = '75b23242598b5ef681209b443ae89c9a04e09ca6379e4c32768a56600be80d2d'
-const DEFAULT_DDG_WORKER_URL = 'https://ddg-image-proxy.3gdelwonk.workers.dev'
-
 // ── Config helpers ──────────────────────────────────────────────────────────
 
 function getJarvisBaseUrl(): string {
@@ -16,15 +14,12 @@ function getJarvisBaseUrl(): string {
 function getJarvisApiKey(): string {
   return localStorage.getItem('grocery-manager-jarvis-key') || (import.meta.env.VITE_JARVIS_API_KEY as string) || 'jmart_sk_7f3a9c2e1b4d8f6a0e5c3b9d'
 }
-function getDdgWorkerUrl(): string {
-  return localStorage.getItem('grocery-manager-ddg-worker-url') || DEFAULT_DDG_WORKER_URL
-}
 function getSerperApiKey(): string {
   return localStorage.getItem('grocery-manager-serper-api-key') || (import.meta.env.VITE_SERPER_API_KEY as string) || DEFAULT_SERPER_KEY
 }
 
 export function isImageSearchConfigured(): boolean {
-  return !!getDdgWorkerUrl() || !!getSerperApiKey()
+  return true // DDG search is always available via JARVISmart server
 }
 
 // ── JARVISmart image endpoints ──────────────────────────────────────────────
@@ -66,16 +61,16 @@ function buildSearchQuery(description: string, _department: string, barcode?: st
   return `${cleaned} product`
 }
 
-// ── DDG image search (via Cloudflare Worker proxy) ──────────────────────────
+// ── DDG image search (via JARVISmart server — no CORS issues) ───────────────
 
 interface DdgImageResult { title: string; imageUrl: string; thumbnailUrl: string; width: number; height: number; source: string }
 interface DdgResponse { results?: DdgImageResult[]; error?: string }
 
 async function ddgImageSearch(query: string): Promise<string | null | 'error'> {
-  const workerUrl = getDdgWorkerUrl()
-  if (!workerUrl) return 'error'
   try {
-    const res = await fetch(`${workerUrl}?q=${encodeURIComponent(query)}&num=5`)
+    const res = await fetch(`${getJarvisBaseUrl()}/api/pos/ddg-images?q=${encodeURIComponent(query)}&num=5`, {
+      headers: { 'X-API-Key': getJarvisApiKey() },
+    })
     if (!res.ok) return 'error'
     const data: DdgResponse = await res.json()
     if (data.error || !data.results || data.results.length === 0) return null
@@ -261,24 +256,23 @@ export async function searchProductImages(
     }
   }
 
-  // Also try DDG Worker for more options
-  const workerUrl = getDdgWorkerUrl()
-  if (workerUrl) {
-    const queries = [buildSearchQuery(description, department), ...(barcode ? [buildSearchQuery(description, department, barcode)] : [])]
-    for (const query of queries) {
-      try {
-        const res = await fetch(`${workerUrl}?q=${encodeURIComponent(query)}&num=10`)
-        if (!res.ok) continue
-        const data: DdgResponse = await res.json()
-        if (!data.results) continue
-        for (const img of data.results) {
-          if (img.width >= 80 && img.height >= 80 && !seen.has(img.imageUrl)) {
-            seen.add(img.imageUrl)
-            results.push({ imageUrl: img.imageUrl, title: img.title, source: img.source, width: img.width, height: img.height })
-          }
+  // Also try DDG via JARVISmart for more options
+  const ddgQueries = [buildSearchQuery(description, department), ...(barcode ? [buildSearchQuery(description, department, barcode)] : [])]
+  for (const query of ddgQueries) {
+    try {
+      const res = await fetch(`${getJarvisBaseUrl()}/api/pos/ddg-images?q=${encodeURIComponent(query)}&num=10`, {
+        headers: { 'X-API-Key': getJarvisApiKey() },
+      })
+      if (!res.ok) continue
+      const data: DdgResponse = await res.json()
+      if (!data.results) continue
+      for (const img of data.results) {
+        if (img.width >= 80 && img.height >= 80 && !seen.has(img.imageUrl)) {
+          seen.add(img.imageUrl)
+          results.push({ imageUrl: img.imageUrl, title: img.title, source: img.source, width: img.width, height: img.height })
         }
-      } catch { /* skip */ }
-    }
+      }
+    } catch { /* skip */ }
   }
 
   return results
