@@ -74,7 +74,7 @@ async function ddgImageSearch(query: string): Promise<string | null | 'error'> {
     if (!res.ok) return 'error'
     const data: DdgResponse = await res.json()
     if (data.error || !data.results || data.results.length === 0) return null
-    const img = data.results.find(i => i.width >= 100 && i.height >= 100)
+    const img = data.results.find(i => (i.width === 0 || i.width >= 100) && (i.height === 0 || i.height >= 100))
     return img?.imageUrl ?? data.results[0]?.imageUrl ?? null
   } catch { return 'error' }
 }
@@ -306,7 +306,7 @@ export async function searchProductImages(
       const data: DdgResponse = await res.json()
       if (!data.results) continue
       for (const img of data.results) {
-        if (img.width >= 80 && img.height >= 80 && !seen.has(img.imageUrl)) {
+        if ((img.width === 0 || img.width >= 80) && (img.height === 0 || img.height >= 80) && !seen.has(img.imageUrl)) {
           seen.add(img.imageUrl)
           results.push({ imageUrl: img.imageUrl, title: img.title, source: img.source, width: img.width, height: img.height })
         }
