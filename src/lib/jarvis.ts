@@ -894,3 +894,11 @@ export async function putImage(
 ): Promise<{ success: boolean }> {
   return jarvisMutate('/api/pos/image/' + encodeURIComponent(itemCode), 'PUT', { imageUrl })
 }
+
+// ── AI Product Identification ───────────────────────────────────────────────
+
+export async function identifyProduct(imageBase64: string): Promise<{
+  suggestions: { description: string; confidence: number; barcode?: string }[]
+}> {
+  return jarvisMutate('/api/pos/identify-product', 'POST', { image: imageBase64 })
+}

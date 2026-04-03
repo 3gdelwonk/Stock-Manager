@@ -47,7 +47,7 @@ const REFRESH_INTERVAL = 5 * 60 * 1000
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-type Tab = 'dashboard' | 'stock' | 'products' | 'expiry' | 'promos' | 'performance' | 'insights'
+type Tab = 'dashboard' | 'stock' | 'expiry' | 'promos' | 'insights' | 'track'
 
 interface DashboardProps {
   onNavigate?: (tab: Tab, action?: 'scan' | 'search') => void
@@ -444,14 +444,14 @@ function QuickActions({ onNavigate }: { onNavigate?: DashboardProps['onNavigate'
   return (
     <div className="grid grid-cols-3 gap-2">
       <button
-        onClick={() => onNavigate?.('products', 'scan')}
+        onClick={() => onNavigate?.('stock', 'scan')}
         className="flex flex-col items-center gap-1.5 rounded-xl bg-emerald-600 text-white py-3 shadow-sm active:bg-emerald-700 transition-colors"
       >
         <ScanBarcode className="w-5 h-5" />
         <span className="text-xs font-semibold">Scan</span>
       </button>
       <button
-        onClick={() => onNavigate?.('products', 'search')}
+        onClick={() => onNavigate?.('stock', 'search')}
         className="flex flex-col items-center gap-1.5 rounded-xl bg-white border border-gray-200 text-gray-700 py-3 shadow-sm active:bg-gray-50 transition-colors"
       >
         <Search className="w-5 h-5" />

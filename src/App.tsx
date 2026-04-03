@@ -1,15 +1,19 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { LayoutDashboard, Warehouse, Package, Clock, Tag, BarChart2, Lightbulb, Settings } from 'lucide-react'
+import { LayoutDashboard, Warehouse, Clock, Tag, BarChart2, Lightbulb, Settings, Plus } from 'lucide-react'
 import Dashboard from './components/Dashboard'
 import LiveStockView from './components/LiveStockView'
-import ProductsView from './components/ProductsView'
 import ExpiryView from './components/ExpiryView'
 import PromotionsView from './components/PromotionsView'
 import PerformanceView from './components/PerformanceView'
 import InsightView from './components/InsightView'
 import SettingsSheet from './components/SettingsSheet'
+import QuickActionsSheet from './components/QuickActionsSheet'
+import SmartScanner from './components/SmartScanner'
+import CreateProductSheet from './components/CreateProductSheet'
+import QuickPriceChangeSheet from './components/QuickPriceChangeSheet'
+import AddBatchSheet from './components/AddBatchSheet'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
 
@@ -53,26 +57,24 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'dashboard' | 'stock' | 'products' | 'expiry' | 'promos' | 'performance' | 'insights'
+type Tab = 'dashboard' | 'stock' | 'expiry' | 'promos' | 'insights' | 'track'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'dashboard',   label: 'Home',       icon: <LayoutDashboard size={16} /> },
-  { id: 'products',    label: 'Products',   icon: <Package size={16} /> },
-  { id: 'stock',       label: 'Stock',      icon: <Warehouse size={16} /> },
-  { id: 'expiry',      label: 'Expiry',     icon: <Clock size={16} /> },
-  { id: 'promos',      label: 'Promos',     icon: <Tag size={16} /> },
-  { id: 'insights',    label: 'Insights',   icon: <Lightbulb size={16} /> },
-  { id: 'performance', label: 'Perform',    icon: <BarChart2 size={16} /> },
+  { id: 'dashboard', label: 'Home',     icon: <LayoutDashboard size={16} /> },
+  { id: 'stock',     label: 'Stock',    icon: <Warehouse size={16} /> },
+  { id: 'expiry',    label: 'Expiry',   icon: <Clock size={16} /> },
+  { id: 'promos',    label: 'Promos',   icon: <Tag size={16} /> },
+  { id: 'insights',  label: 'Insights', icon: <Lightbulb size={16} /> },
+  { id: 'track',     label: 'Track',    icon: <BarChart2 size={16} /> },
 ]
 
 const TAB_TITLES: Record<Tab, string> = {
-  dashboard:   'Dashboard',
-  stock:       'Live Stock',
-  products:    'Products',
-  expiry:      'Expiry Management',
-  promos:      'Promotions',
-  insights:    'AI Insights',
-  performance: 'Performance',
+  dashboard: 'Dashboard',
+  stock:     'Stock',
+  expiry:    'Expiry Management',
+  promos:    'Promotions',
+  insights:  'AI Insights',
+  track:     'Track',
 }
 
 const LAST_TAB_KEY = 'grocery-manager-last-tab'
@@ -80,10 +82,20 @@ const LAST_TAB_KEY = 'grocery-manager-last-tab'
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
     const saved = localStorage.getItem(LAST_TAB_KEY) as Tab | null
+    // Migrate old tab names
+    if (saved === 'products' as string) return 'stock'
+    if (saved === 'performance' as string) return 'track'
     return saved && TABS.some(t => t.id === saved) ? saved : 'dashboard'
   })
   const [showSettings, setShowSettings] = useState(false)
-  const [productsAction, setProductsAction] = useState<'scan' | 'search' | null>(null)
+  const [stockAction, setStockAction] = useState<'scan' | 'search' | null>(null)
+
+  // ── Global quick actions state ──
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false)
+  const [smartScannerOpen, setSmartScannerOpen] = useState(false)
+  const [createSheetOpen, setCreateSheetOpen] = useState(false)
+  const [priceChangeOpen, setPriceChangeOpen] = useState(false)
+  const [addBatchOpen, setAddBatchOpen] = useState(false)
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
@@ -92,21 +104,20 @@ export default function App() {
   }
 
   function handleNavigate(tab: Tab, action?: 'scan' | 'search') {
-    if (tab === 'products' && action) {
-      setProductsAction(action)
+    if (tab === 'stock' && action) {
+      setStockAction(action)
     }
     handleTabChange(tab)
   }
 
   const renderTab = () => {
     switch (activeTab) {
-      case 'dashboard':   return <Dashboard onNavigate={handleNavigate} />
-      case 'stock':       return <LiveStockView />
-      case 'products':    return <ProductsView initialAction={productsAction} onActionConsumed={() => setProductsAction(null)} />
-      case 'expiry':      return <ExpiryView />
-      case 'promos':      return <PromotionsView />
-      case 'insights':    return <InsightView />
-      case 'performance': return <PerformanceView />
+      case 'dashboard': return <Dashboard onNavigate={handleNavigate} />
+      case 'stock':     return <LiveStockView initialAction={stockAction} onActionConsumed={() => setStockAction(null)} />
+      case 'expiry':    return <ExpiryView />
+      case 'promos':    return <PromotionsView />
+      case 'insights':  return <InsightView />
+      case 'track':     return <PerformanceView />
     }
   }
 
@@ -114,9 +125,18 @@ export default function App() {
     <div className="flex flex-col h-screen-safe max-w-[480px] mx-auto bg-white relative">
       <header className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white shrink-0">
         <h1 className="text-base font-semibold text-gray-900">{TAB_TITLES[activeTab]}</h1>
-        <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500" aria-label="Settings">
-          <Settings size={18} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setQuickActionsOpen(true)}
+            className="p-1.5 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+            aria-label="Quick actions"
+          >
+            <Plus size={18} />
+          </button>
+          <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500" aria-label="Settings">
+            <Settings size={18} />
+          </button>
+        </div>
       </header>
 
       <UpdateBanner />
@@ -138,7 +158,54 @@ export default function App() {
         ))}
       </nav>
 
+      {/* ── Global modals ── */}
       {showSettings && <SettingsSheet onClose={() => setShowSettings(false)} />}
+
+      <QuickActionsSheet
+        open={quickActionsOpen}
+        onClose={() => setQuickActionsOpen(false)}
+        onSmartScan={() => { setQuickActionsOpen(false); setSmartScannerOpen(true) }}
+        onCreateProduct={() => { setQuickActionsOpen(false); setCreateSheetOpen(true) }}
+        onChangePrice={() => { setQuickActionsOpen(false); setPriceChangeOpen(true) }}
+        onAddExpiry={() => { setQuickActionsOpen(false); setAddBatchOpen(true) }}
+      />
+
+      <SmartScanner
+        open={smartScannerOpen}
+        onClose={() => setSmartScannerOpen(false)}
+        onProductFound={(product) => {
+          setSmartScannerOpen(false)
+          // Navigate to stock tab with the product's barcode as search
+          setStockAction('search')
+          handleTabChange('stock')
+          // Small delay to let the tab mount, then set search via action
+          setTimeout(() => {
+            const input = document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')
+            if (input) { input.value = product.barcode || product.name; input.dispatchEvent(new Event('input', { bubbles: true })) }
+          }, 200)
+        }}
+        onProductNotFound={() => {
+          setSmartScannerOpen(false)
+          setCreateSheetOpen(true)
+        }}
+      />
+
+      <CreateProductSheet
+        open={createSheetOpen}
+        onClose={() => setCreateSheetOpen(false)}
+        onSuccess={() => setCreateSheetOpen(false)}
+      />
+
+      <QuickPriceChangeSheet
+        open={priceChangeOpen}
+        onClose={() => setPriceChangeOpen(false)}
+        onSelectProduct={() => setPriceChangeOpen(false)}
+      />
+
+      <AddBatchSheet
+        open={addBatchOpen}
+        onClose={() => setAddBatchOpen(false)}
+      />
     </div>
   )
 }
