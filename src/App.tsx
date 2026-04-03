@@ -1,13 +1,14 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { LayoutDashboard, Warehouse, Package, Clock, Tag, BarChart2, Settings } from 'lucide-react'
+import { LayoutDashboard, Warehouse, Package, Clock, Tag, BarChart2, Lightbulb, Settings } from 'lucide-react'
 import Dashboard from './components/Dashboard'
 import LiveStockView from './components/LiveStockView'
 import ProductsView from './components/ProductsView'
 import ExpiryView from './components/ExpiryView'
 import PromotionsView from './components/PromotionsView'
 import PerformanceView from './components/PerformanceView'
+import InsightView from './components/InsightView'
 import SettingsSheet from './components/SettingsSheet'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
@@ -52,14 +53,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'dashboard' | 'stock' | 'products' | 'expiry' | 'promos' | 'performance'
+type Tab = 'dashboard' | 'stock' | 'products' | 'expiry' | 'promos' | 'performance' | 'insights'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'dashboard',   label: 'Dashboard',  icon: <LayoutDashboard size={16} /> },
-  { id: 'stock',       label: 'Live Stock',  icon: <Warehouse size={16} /> },
+  { id: 'dashboard',   label: 'Home',       icon: <LayoutDashboard size={16} /> },
   { id: 'products',    label: 'Products',   icon: <Package size={16} /> },
+  { id: 'stock',       label: 'Stock',      icon: <Warehouse size={16} /> },
   { id: 'expiry',      label: 'Expiry',     icon: <Clock size={16} /> },
   { id: 'promos',      label: 'Promos',     icon: <Tag size={16} /> },
+  { id: 'insights',    label: 'Insights',   icon: <Lightbulb size={16} /> },
   { id: 'performance', label: 'Perform',    icon: <BarChart2 size={16} /> },
 ]
 
@@ -69,6 +71,7 @@ const TAB_TITLES: Record<Tab, string> = {
   products:    'Products',
   expiry:      'Expiry Management',
   promos:      'Promotions',
+  insights:    'AI Insights',
   performance: 'Performance',
 }
 
@@ -102,6 +105,7 @@ export default function App() {
       case 'products':    return <ProductsView initialAction={productsAction} onActionConsumed={() => setProductsAction(null)} />
       case 'expiry':      return <ExpiryView />
       case 'promos':      return <PromotionsView />
+      case 'insights':    return <InsightView />
       case 'performance': return <PerformanceView />
     }
   }

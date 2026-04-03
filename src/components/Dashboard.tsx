@@ -47,7 +47,7 @@ const REFRESH_INTERVAL = 5 * 60 * 1000
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-type Tab = 'dashboard' | 'stock' | 'products' | 'expiry' | 'promos' | 'performance'
+type Tab = 'dashboard' | 'stock' | 'products' | 'expiry' | 'promos' | 'performance' | 'insights'
 
 interface DashboardProps {
   onNavigate?: (tab: Tab, action?: 'scan' | 'search') => void
