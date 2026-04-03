@@ -47,7 +47,13 @@ const REFRESH_INTERVAL = 5 * 60 * 1000
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export default function Dashboard() {
+type Tab = 'dashboard' | 'stock' | 'products' | 'expiry' | 'promos' | 'performance'
+
+interface DashboardProps {
+  onNavigate?: (tab: Tab, action?: 'scan' | 'search') => void
+}
+
+export default function Dashboard({ onNavigate }: DashboardProps) {
   // ── State ────────────────────
   const [connected, setConnected] = useState<boolean | null>(null)
   const [lastFetch, setLastFetch] = useState<Date | null>(null)
@@ -171,7 +177,7 @@ export default function Dashboard() {
         )}
         {/* Expiry section still works offline */}
         {expiry && <ExpiryCard expiry={expiry} />}
-        <QuickActions />
+        <QuickActions onNavigate={onNavigate} />
         <button
           onClick={() => fetchAll(true)}
           disabled={refreshing}
@@ -390,7 +396,7 @@ export default function Dashboard() {
       {expiry && <ExpiryCard expiry={expiry} />}
 
       {/* 8. Quick Actions */}
-      <QuickActions />
+      <QuickActions onNavigate={onNavigate} />
     </div>
   )
 }
@@ -434,18 +440,27 @@ function ExpiryCard({ expiry }: { expiry: ExpirySummary }) {
   )
 }
 
-function QuickActions() {
+function QuickActions({ onNavigate }: { onNavigate?: DashboardProps['onNavigate'] }) {
   return (
     <div className="grid grid-cols-3 gap-2">
-      <button className="flex flex-col items-center gap-1.5 rounded-xl bg-emerald-600 text-white py-3 shadow-sm active:bg-emerald-700 transition-colors">
+      <button
+        onClick={() => onNavigate?.('products', 'scan')}
+        className="flex flex-col items-center gap-1.5 rounded-xl bg-emerald-600 text-white py-3 shadow-sm active:bg-emerald-700 transition-colors"
+      >
         <ScanBarcode className="w-5 h-5" />
         <span className="text-xs font-semibold">Scan</span>
       </button>
-      <button className="flex flex-col items-center gap-1.5 rounded-xl bg-white border border-gray-200 text-gray-700 py-3 shadow-sm active:bg-gray-50 transition-colors">
+      <button
+        onClick={() => onNavigate?.('products', 'search')}
+        className="flex flex-col items-center gap-1.5 rounded-xl bg-white border border-gray-200 text-gray-700 py-3 shadow-sm active:bg-gray-50 transition-colors"
+      >
         <Search className="w-5 h-5" />
         <span className="text-xs font-semibold">Search</span>
       </button>
-      <button className="flex flex-col items-center gap-1.5 rounded-xl bg-white border border-gray-200 text-gray-700 py-3 shadow-sm active:bg-gray-50 transition-colors">
+      <button
+        onClick={() => onNavigate?.('expiry')}
+        className="flex flex-col items-center gap-1.5 rounded-xl bg-white border border-gray-200 text-gray-700 py-3 shadow-sm active:bg-gray-50 transition-colors"
+      >
         <Tag className="w-5 h-5" />
         <span className="text-xs font-semibold">Import</span>
       </button>

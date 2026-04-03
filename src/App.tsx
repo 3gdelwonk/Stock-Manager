@@ -80,6 +80,7 @@ export default function App() {
     return saved && TABS.some(t => t.id === saved) ? saved : 'dashboard'
   })
   const [showSettings, setShowSettings] = useState(false)
+  const [productsAction, setProductsAction] = useState<'scan' | 'search' | null>(null)
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
@@ -87,11 +88,18 @@ export default function App() {
     setShowSettings(false)
   }
 
+  function handleNavigate(tab: Tab, action?: 'scan' | 'search') {
+    if (tab === 'products' && action) {
+      setProductsAction(action)
+    }
+    handleTabChange(tab)
+  }
+
   const renderTab = () => {
     switch (activeTab) {
-      case 'dashboard':   return <Dashboard />
+      case 'dashboard':   return <Dashboard onNavigate={handleNavigate} />
       case 'stock':       return <LiveStockView />
-      case 'products':    return <ProductsView />
+      case 'products':    return <ProductsView initialAction={productsAction} onActionConsumed={() => setProductsAction(null)} />
       case 'expiry':      return <ExpiryView />
       case 'promos':      return <PromotionsView />
       case 'performance': return <PerformanceView />

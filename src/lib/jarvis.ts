@@ -38,6 +38,32 @@ async function jarvisFetch<T>(path: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function jarvisMutate<T>(path: string, method: 'POST' | 'PUT', body: unknown): Promise<T> {
+  const url = `${getBaseUrl()}${path}`
+  let res: Response
+  try {
+    res = await fetch(url, {
+      method,
+      headers: {
+        'X-API-Key': getApiKey(),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+  } catch (err) {
+    const base = getBaseUrl()
+    if (typeof window !== 'undefined' && window.location.protocol === 'https:' && base.startsWith('http:')) {
+      throw new Error(`Mixed content blocked: cannot call HTTP API (${base}) from HTTPS page.`)
+    }
+    throw new Error(`Network error reaching ${base} — ${(err as Error).message}`)
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(`JARVISmart ${res.status}: ${text}`)
+  }
+  return res.json() as Promise<T>
+}
+
 // ── Raw API shapes ──────────────────────────────────────────────────────────
 
 interface RawPromoItem {
@@ -415,22 +441,18 @@ export async function getRecentPriceChanges(since: string, excludeHost = true): 
   return Array.from(seen.values())
 }
 
-// ── PUT Price Change (NEW for Grocery Manager) ──────────────────────────────
+// ── PUT Price Change (legacy — prefer changeAndSend) ─────────────────────────
 
+/** @deprecated Use changeAndSend() which also pushes to POS registers */
 export async function putPrice(
   itemCode: string,
   body: PriceChangeRequest,
 ): Promise<PriceChangeResponse> {
-  const res = await fetch(`${getBaseUrl()}/api/pos/price/${encodeURIComponent(itemCode)}`, {
-    method: 'PUT',
-    headers: {
-      'X-API-Key': getApiKey(),
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`JARVISmart ${res.status}: ${res.statusText}`)
-  return res.json() as Promise<PriceChangeResponse>
+  return jarvisMutate<PriceChangeResponse>(
+    `/api/pos/price/${encodeURIComponent(itemCode)}`,
+    'PUT',
+    body,
+  )
 }
 
 // ── Promotions (all departments) ────────────────────────────────────────────
@@ -483,4 +505,392 @@ export async function getPromotions(): Promise<{ items: LivePromotion[]; count: 
 
   const deduped = Array.from(seen.values())
   return { items: deduped, count: deduped.length, expiringSoonCount }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── POS ACTION Endpoints (WRITE) ────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Change & Send (price change + push to registers) ─────────────────────────
+
+export interface ChangeAndSendRequest {
+  barcode: string
+  newPrice: number
+  reason?: string
+}
+
+export interface ChangeAndSendResponse {
+  success: boolean
+  barcode: string
+  itemCode?: string
+  oldPrice?: number
+  newPrice: number
+  sentToPos?: boolean
+  message?: string
+}
+
+export async function changeAndSend(
+  barcode: string,
+  newPrice: number,
+  reason?: string,
+): Promise<ChangeAndSendResponse> {
+  return jarvisMutate<ChangeAndSendResponse>(
+    '/api/pos-actions/change-and-send',
+    'POST',
+    { barcode, newPrice, reason },
+  )
+}
+
+// ── Send to POS (push items to registers via file) ───────────────────────────
+
+export interface SendToPosRequest {
+  items: { barcode: string }[]
+}
+
+export interface SendToPosResponse {
+  success: boolean
+  itemCount: number
+  message?: string
+}
+
+export async function sendToPos(items: { barcode: string }[]): Promise<SendToPosResponse> {
+  return jarvisMutate<SendToPosResponse>(
+    '/api/pos-actions/send-to-pos',
+    'POST',
+    { items },
+  )
+}
+
+// ── Update Back-Office Price (no POS push) ───────────────────────────────────
+
+export interface UpdatePriceResponse {
+  success: boolean
+  barcode: string
+  oldPrice?: number
+  newPrice: number
+  message?: string
+}
+
+export async function updateBackOfficePrice(
+  barcode: string,
+  newPrice: number,
+): Promise<UpdatePriceResponse> {
+  return jarvisMutate<UpdatePriceResponse>(
+    `/api/pos-actions/price/${encodeURIComponent(barcode)}`,
+    'PUT',
+    { newPrice },
+  )
+}
+
+// ── Create Item ──────────────────────────────────────────────────────────────
+
+export interface CreateItemRequest {
+  barcode: string
+  description: string
+  departmentCode: number
+  sellPrice: number
+  costPrice?: number
+  isGstFree?: boolean
+  ctnQty?: number
+  minStockLevel?: number
+}
+
+export interface CreateItemResponse {
+  success: boolean
+  barcode: string
+  itemCode?: string
+  sentToPos?: boolean
+  message?: string
+}
+
+export async function createItem(item: CreateItemRequest): Promise<CreateItemResponse> {
+  return jarvisMutate<CreateItemResponse>(
+    '/api/pos-actions/create-item',
+    'POST',
+    item,
+  )
+}
+
+// ── Create Promo ─────────────────────────────────────────────────────────────
+
+export interface CreatePromoRequest {
+  barcode: string
+  promoPrice: number
+  startDate: string
+  endDate: string
+  description?: string
+}
+
+export interface CreatePromoResponse {
+  success: boolean
+  barcode: string
+  sentToPos?: boolean
+  message?: string
+}
+
+export async function createPromo(promo: CreatePromoRequest): Promise<CreatePromoResponse> {
+  return jarvisMutate<CreatePromoResponse>(
+    '/api/pos-actions/create-promo',
+    'POST',
+    promo,
+  )
+}
+
+// ── Print Label ──────────────────────────────────────────────────────────────
+
+export interface PrintLabelResponse {
+  success: boolean
+  barcode: string
+  queued?: boolean
+  message?: string
+}
+
+export async function printLabel(barcode: string, qty = 1): Promise<PrintLabelResponse> {
+  return jarvisMutate<PrintLabelResponse>(
+    '/api/pos-actions/print-label',
+    'POST',
+    { barcode, qty },
+  )
+}
+
+// ── Adjust Stock ─────────────────────────────────────────────────────────────
+
+export interface AdjustStockRequest {
+  barcode: string
+  qty: number
+  reason: string
+}
+
+export interface AdjustStockResponse {
+  success: boolean
+  barcode: string
+  previousQoh?: number
+  newQoh?: number
+  message?: string
+}
+
+export async function adjustStock(
+  barcode: string,
+  qty: number,
+  reason: string,
+): Promise<AdjustStockResponse> {
+  return jarvisMutate<AdjustStockResponse>(
+    '/api/pos-actions/adjust-stock',
+    'POST',
+    { barcode, qty, reason },
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── READ Endpoints (new) ────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── Item Performance ─────────────────────────────────────────────────────────
+
+export interface ItemPerformanceEntry {
+  itemCode: string
+  barcode: string | null
+  description: string
+  department: string
+  revenue: number
+  cost: number
+  grossProfit: number
+  marginPercent: number
+  qtySold: number
+  velocity: number
+  grade?: string
+  rank?: number
+  [key: string]: unknown
+}
+
+export async function getItemPerformance(params?: {
+  department?: string
+  days?: number
+  limit?: number
+  sortBy?: 'revenue' | 'margin' | 'velocity' | 'profit'
+}): Promise<{ items: ItemPerformanceEntry[]; count: number }> {
+  const qs = new URLSearchParams()
+  if (params?.department) qs.set('department', params.department)
+  if (params?.days) qs.set('days', String(params.days))
+  if (params?.limit) qs.set('limit', String(params.limit))
+  if (params?.sortBy) qs.set('sortBy', params.sortBy)
+  const q = qs.toString()
+  return jarvisFetch(`/api/pos/item-performance${q ? '?' + q : ''}`)
+}
+
+// ── Financials ───────────────────────────────────────────────────────────────
+
+export interface FinancialSummary {
+  period: string
+  terminals: Array<{
+    terminal: string
+    cash: number
+    eftpos: number
+    voids: number
+    refunds: number
+    discounts: number
+    [key: string]: unknown
+  }>
+  totals: {
+    cash: number
+    eftpos: number
+    voids: number
+    refunds: number
+    discounts: number
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+export async function getFinancials(
+  period: 'today' | 'week' | 'month' | string = 'today',
+): Promise<FinancialSummary> {
+  return jarvisFetch(`/api/pos/financials?period=${encodeURIComponent(period)}`)
+}
+
+// ── Hourly Sales ─────────────────────────────────────────────────────────────
+
+export interface HourlySalesEntry {
+  hour: number
+  revenue: number
+  transactions: number
+  department?: string
+  [key: string]: unknown
+}
+
+export async function getHourlySales(
+  period: 'today' | 'week' | string = 'today',
+): Promise<{ period: string; hours: HourlySalesEntry[] }> {
+  return jarvisFetch(`/api/pos/hourly-sales?period=${encodeURIComponent(period)}`)
+}
+
+// ── Trends ───────────────────────────────────────────────────────────────────
+
+export interface TrendEntry {
+  date: string
+  revenue: number
+  cost: number
+  grossProfit: number
+  transactions: number
+  promoSalesPercent?: number
+  [key: string]: unknown
+}
+
+export async function getTrends(
+  range: 'daily' | 'weekly' | 'monthly' | string = 'daily',
+  days = 30,
+): Promise<{ range: string; entries: TrendEntry[] }> {
+  return jarvisFetch(`/api/pos/trends?range=${encodeURIComponent(range)}&days=${days}`)
+}
+
+// ── Expense Trends ───────────────────────────────────────────────────────────
+
+export interface ExpenseTrendEntry {
+  month: string
+  category: string
+  amount: number
+  [key: string]: unknown
+}
+
+export async function getExpenseTrends(
+  months = 6,
+): Promise<{ entries: ExpenseTrendEntry[] }> {
+  return jarvisFetch(`/api/pos/expense-trends?months=${months}`)
+}
+
+// ── Stock Suggestions ────────────────────────────────────────────────────────
+
+export interface StockSuggestion {
+  itemCode: string
+  barcode: string | null
+  description: string
+  department: string
+  currentQoh: number
+  avgDailyQty: number
+  suggestedOrderQty: number
+  daysUntilStockout: number | null
+  reorderLevel: number
+  [key: string]: unknown
+}
+
+export async function getStockSuggestions(): Promise<{ items: StockSuggestion[]; count: number }> {
+  return jarvisFetch('/api/pos/stock-suggestions')
+}
+
+// ── Orders ───────────────────────────────────────────────────────────────────
+
+export interface PurchaseOrder {
+  orderId: string
+  supplier?: string
+  status: string
+  orderDate: string
+  totalItems: number
+  totalCost: number
+  lines?: Array<{
+    itemCode: string
+    description: string
+    qty: number
+    cost: number
+    [key: string]: unknown
+  }>
+  [key: string]: unknown
+}
+
+export async function getOrders(
+  status?: string,
+): Promise<{ orders: PurchaseOrder[]; count: number }> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+  return jarvisFetch(`/api/pos/orders${qs}`)
+}
+
+// ── Order Summary ────────────────────────────────────────────────────────────
+
+export interface OrderSummaryEntry {
+  month: string
+  orderCount: number
+  totalCost: number
+  totalItems: number
+  [key: string]: unknown
+}
+
+export async function getOrderSummary(): Promise<{ months: OrderSummaryEntry[] }> {
+  return jarvisFetch('/api/pos/order-summary')
+}
+
+// ── Online Prices (Competitive) ──────────────────────────────────────────────
+
+export interface OnlinePrice {
+  source: string
+  name: string
+  price: number
+  url?: string
+  size?: string
+  [key: string]: unknown
+}
+
+export async function getOnlinePrices(
+  query: string,
+): Promise<{ query: string; results: OnlinePrice[] }> {
+  return jarvisFetch(`/api/pos/online-prices?q=${encodeURIComponent(query)}`)
+}
+
+// ── Department List ──────────────────────────────────────────────────────────
+
+export interface DepartmentListEntry {
+  code: number
+  name: string
+  [key: string]: unknown
+}
+
+export async function getDepartmentList(): Promise<{ departments: DepartmentListEntry[] }> {
+  return jarvisFetch('/api/pos/department-list')
+}
+
+// ── Put Image ────────────────────────────────────────────────────────────────
+
+export async function putImage(
+  itemCode: string,
+  imageUrl: string,
+): Promise<{ success: boolean }> {
+  return jarvisMutate('/api/pos/image/' + encodeURIComponent(itemCode), 'PUT', { imageUrl })
 }

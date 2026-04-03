@@ -1,9 +1,10 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { Plus, Search, ScanBarcode, AlertTriangle, Clock, Trash2, ShoppingCart, CalendarPlus, X, Check } from 'lucide-react'
+import { Plus, Search, ScanBarcode, AlertTriangle, Clock, Trash2, ShoppingCart, CalendarPlus, X, Check, Printer } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { db } from '../lib/db'
 import { getExpiryUrgency, daysUntilExpiry, markAsWaste, markAsSold, extendExpiry, addExpiryBatch, type ExpiryUrgency } from '../lib/expiry'
+import { adjustStock, printLabel } from '../lib/jarvis'
 import type { ExpiryBatch, WasteLogEntry } from '../lib/types'
 import BarcodeScanner from './BarcodeScanner'
 import { DEPARTMENT_COLORS } from '../lib/constants'
@@ -414,6 +415,12 @@ function BatchCard({
             >
               <CalendarPlus size={13} /> Extend
             </button>
+            <button
+              onClick={() => printLabel(batch.barcode).catch(() => {})}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+            >
+              <Printer size={13} /> Label
+            </button>
           </div>
         )}
       </div>
@@ -503,6 +510,8 @@ function WasteForm({ batch, onDone }: { batch: ExpiryBatch; onDone: () => void }
       const costPrice = product?.costPrice ?? 0
       const sellPrice = product?.sellPrice ?? 0
       await markAsWaste(batch.id!, qty, reason, costPrice, sellPrice, claimable)
+      // Also adjust POS stock (best-effort, don't block on failure)
+      adjustStock(batch.barcode, -qty, 'waste').catch(() => {})
       onDone()
     } catch (e) {
       console.error('Failed to mark waste:', e)

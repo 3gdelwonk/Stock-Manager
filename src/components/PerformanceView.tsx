@@ -1,16 +1,18 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
+import { Loader2, ArrowDown, Printer, Trash2 } from 'lucide-react'
 import { db } from '../lib/db'
 import {
   getLatestQoh, classifyABC, classifyXYZ, computePerformance, stockValue, opportunityMatrix,
   snapshotAgeDays, needsReplenishment,
 } from '../lib/analytics'
-import { getPromotions } from '../lib/jarvis'
+import { getPromotions, getItemPerformance, getStockSuggestions, adjustStock, printLabel } from '../lib/jarvis'
+import type { ItemPerformanceEntry, StockSuggestion } from '../lib/jarvis'
 import { useTrackedItemCodes } from '../lib/useTrackedItems'
 import type { StockPerformance } from '../lib/types'
 import { LEAD_TIME_DEFAULT } from '../lib/constants'
 
-type SubView = 'table' | 'matrix'
+type SubView = 'table' | 'matrix' | 'rankings' | 'reorder'
 type SortCol = 'name' | 'qoh' | 'days' | 'velocity' | 'trend' | 'gmroi' | 'abc' | 'xyz'
 
 const ABC_COLORS: Record<string, string> = { A: 'bg-green-100 text-green-700', B: 'bg-blue-100 text-blue-700', C: 'bg-amber-100 text-amber-700', D: 'bg-gray-100 text-gray-500' }
@@ -126,9 +128,9 @@ export default function PerformanceView() {
   return (
     <div className="flex flex-col h-full">
       {/* Sub-nav */}
-      <div className="flex border-b border-gray-100 bg-white">
-        {(['table', 'matrix'] as SubView[]).map(v => (
-          <button key={v} onClick={() => setSubView(v)} className={`flex-1 py-2.5 text-sm font-medium transition-colors ${subView === v ? 'text-emerald-600 border-b-2 border-emerald-600' : 'text-gray-500'}`}>
+      <div className="flex border-b border-gray-100 bg-white overflow-x-auto">
+        {(['table', 'matrix', 'rankings', 'reorder'] as SubView[]).map(v => (
+          <button key={v} onClick={() => setSubView(v)} className={`flex-1 py-2.5 text-sm font-medium transition-colors whitespace-nowrap px-2 ${subView === v ? 'text-emerald-600 border-b-2 border-emerald-600' : 'text-gray-500'}`}>
             {v.charAt(0).toUpperCase() + v.slice(1)}
           </button>
         ))}
@@ -234,7 +236,8 @@ export default function PerformanceView() {
                     {computed.deadStock.map(({ product, qoh, value }) => (
                       <div key={product.id} className="flex items-center gap-2 px-4 py-2.5">
                         <span className="text-sm text-gray-700 flex-1 truncate">{product.name}</span>
-                        <span className="text-xs text-gray-500 shrink-0">QOH {qoh} · ${value.toFixed(0)}</span>
+                        <span className="text-xs text-gray-500 shrink-0 mr-2">QOH {qoh} · ${value.toFixed(0)}</span>
+                        <DeadStockActions barcode={product.barcode || product.itemCode} />
                       </div>
                     ))}
                   </div>
@@ -244,7 +247,7 @@ export default function PerformanceView() {
           </div>
         ) : (
           /* Matrix view */
-          <div className="p-4 space-y-3 pb-8">
+          subView === 'matrix' ? <div className="p-4 space-y-3 pb-8">
             <p className="text-xs text-gray-500">Products classified by velocity and stock level</p>
             <div className="grid grid-cols-2 gap-3">
               {(['star', 'opportunity', 'overstock', 'deadweight'] as const).map(q => {
@@ -287,7 +290,159 @@ export default function PerformanceView() {
               })}
             </div>
           </div>
-        )}
+        : subView === 'rankings' ? <RankingsTab />
+        : subView === 'reorder' ? <ReorderTab />
+        : null)}
+      </div>
+    </div>
+  )
+}
+
+// ─── Dead Stock Actions ─────────────────────────────────────────────────────
+
+function DeadStockActions({ barcode }: { barcode: string }) {
+  const [busy, setBusy] = useState<string | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  async function handleWriteOff() {
+    setBusy('writeoff')
+    try {
+      await adjustStock(barcode, 0, 'write_off')
+      setMsg('Written off')
+    } catch { setMsg('Failed') }
+    setBusy(null)
+  }
+
+  async function handlePrint() {
+    setBusy('print')
+    try {
+      await printLabel(barcode)
+      setMsg('Label queued')
+    } catch { setMsg('Failed') }
+    setBusy(null)
+  }
+
+  if (msg) return <span className="text-[10px] text-emerald-600 font-medium">{msg}</span>
+
+  return (
+    <div className="flex items-center gap-1 shrink-0">
+      <button
+        onClick={handleWriteOff}
+        disabled={busy !== null}
+        className="p-1 rounded hover:bg-red-50 text-red-500 disabled:opacity-50"
+        title="Write off"
+      >
+        {busy === 'writeoff' ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+      </button>
+      <button
+        onClick={handlePrint}
+        disabled={busy !== null}
+        className="p-1 rounded hover:bg-gray-100 text-gray-500 disabled:opacity-50"
+        title="Print label"
+      >
+        {busy === 'print' ? <Loader2 size={14} className="animate-spin" /> : <Printer size={14} />}
+      </button>
+    </div>
+  )
+}
+
+// ─── Rankings Tab ───────────────────────────────────────────────────────────
+
+function RankingsTab() {
+  const [data, setData] = useState<ItemPerformanceEntry[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    getItemPerformance()
+      .then(r => { setData(r.items); setError(null) })
+      .catch(e => setError((e as Error).message))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 text-emerald-600 animate-spin" /></div>
+  if (error) return <div className="p-4 text-sm text-red-600">{error}</div>
+  if (!data?.length) return <div className="p-4 text-sm text-gray-400">No performance data available</div>
+
+  return (
+    <div className="p-4 space-y-2 pb-8">
+      <p className="text-xs text-gray-500 mb-2">Server-side performance grades from JARVISmart</p>
+      <div className="overflow-x-auto -mx-4">
+        <table className="w-full text-xs min-w-[400px]">
+          <thead className="bg-gray-50 text-gray-500">
+            <tr>
+              <th className="py-2 px-2 text-left font-medium">Product</th>
+              <th className="py-2 px-2 text-left font-medium">Grade</th>
+              <th className="py-2 px-2 text-right font-medium">Revenue</th>
+              <th className="py-2 px-2 text-right font-medium">GP%</th>
+              <th className="py-2 px-2 text-right font-medium">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((item, i) => {
+              const gradeColor = item.grade === 'A' ? 'bg-green-100 text-green-700'
+                : item.grade === 'B' ? 'bg-blue-100 text-blue-700'
+                : item.grade === 'C' ? 'bg-amber-100 text-amber-700'
+                : 'bg-red-100 text-red-700'
+              return (
+                <tr key={i} className="border-b border-gray-50">
+                  <td className="py-2 px-2 max-w-[160px]"><span className="truncate block">{item.description}</span></td>
+                  <td className="py-2 px-2"><span className={`px-1.5 py-0.5 rounded text-xs font-medium ${gradeColor}`}>{item.grade}</span></td>
+                  <td className="py-2 px-2 text-right">${item.revenue.toFixed(0)}</td>
+                  <td className="py-2 px-2 text-right">{item.marginPercent.toFixed(1)}%</td>
+                  <td className="py-2 px-2 text-right">{item.qtySold}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ─── Reorder Tab ────────────────────────────────────────────────────────────
+
+function ReorderTab() {
+  const [data, setData] = useState<StockSuggestion[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    getStockSuggestions()
+      .then(r => { setData(r.items); setError(null) })
+      .catch(e => setError((e as Error).message))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-6 h-6 text-emerald-600 animate-spin" /></div>
+  if (error) return <div className="p-4 text-sm text-red-600">{error}</div>
+  if (!data?.length) return <div className="p-4 text-sm text-gray-400">No reorder suggestions</div>
+
+  return (
+    <div className="p-4 space-y-2 pb-8">
+      <p className="text-xs text-gray-500 mb-2">JARVISmart reorder suggestions based on velocity and stock levels</p>
+      <div className="divide-y divide-gray-100">
+        {data.map((item, i) => (
+          <div key={i} className="flex items-center gap-3 py-2.5">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-gray-900 truncate">{item.description}</p>
+              <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
+                <span>QOH: {item.currentQoh}</span>
+                <span>Vel: {item.avgDailyQty.toFixed(1)}/d</span>
+              </div>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="flex items-center gap-1 text-emerald-700 font-semibold text-sm">
+                <ArrowDown size={14} />
+                {item.suggestedOrderQty}
+              </div>
+              <p className="text-[10px] text-gray-400">suggested</p>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { Search, ChevronDown, ChevronUp, ScanBarcode } from 'lucide-react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import BarcodeScanner from './BarcodeScanner'
@@ -201,7 +201,12 @@ function ProductRow({ product, qoh, activePromo, isTracked, onPriceChange }: Pro
   )
 }
 
-export default function ProductsView() {
+interface ProductsViewProps {
+  initialAction?: 'scan' | 'search' | null
+  onActionConsumed?: () => void
+}
+
+export default function ProductsView({ initialAction, onActionConsumed }: ProductsViewProps = {}) {
   const products = useLiveQuery(() => db.products.toArray(), [])
   const snapshots = useLiveQuery(() => db.stockSnapshots.toArray(), [])
   const promotions = useLiveQuery(() => db.promotions.toArray(), [])
@@ -212,6 +217,18 @@ export default function ProductsView() {
   const [sort, setSort] = useState<SortKey>('name')
   const [scannerOpen, setScannerOpen] = useState(false)
   const { resolveCode } = useProductCodeLookup()
+  const searchInputRef = useRef<HTMLInputElement>(null)
+
+  // Handle initial action from Dashboard navigation
+  useEffect(() => {
+    if (!initialAction) return
+    if (initialAction === 'scan') {
+      setScannerOpen(true)
+    } else if (initialAction === 'search') {
+      setTimeout(() => searchInputRef.current?.focus(), 100)
+    }
+    onActionConsumed?.()
+  }, [initialAction, onActionConsumed])
 
   // PriceChangeModal state
   const [priceModalOpen, setPriceModalOpen] = useState(false)
@@ -291,6 +308,7 @@ export default function ProductsView() {
           <div className="relative flex-1">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
+              ref={searchInputRef}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search name, barcode, item code, aisle..."

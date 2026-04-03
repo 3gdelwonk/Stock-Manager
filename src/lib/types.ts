@@ -180,3 +180,13 @@ export interface StockPerformance {
   xyzClass: 'X' | 'Y' | 'Z'
   shrinkage: number
 }
+
+// ─── Promo ROI Cache ──────────────────────────────────────────────────────
+export interface PromoROICacheEntry {
+  id?: number
+  itemCode: string
+  promoStart: string
+  promoEnd: string
+  result: import('./promoROI').PromoROIResult
+  computedAt: Date
+}

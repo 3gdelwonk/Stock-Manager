@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { X, Check, AlertCircle } from 'lucide-react'
-import { putPrice } from '../lib/jarvis'
+import { X, Check, AlertCircle, Send, Tag } from 'lucide-react'
+import { changeAndSend, updateBackOfficePrice, printLabel } from '../lib/jarvis'
 import { db } from '../lib/db'
 import { PRICE_CHANGE_REASONS } from '../lib/constants'
 import type { TrackedItem } from '../lib/types'
@@ -12,6 +12,8 @@ interface PriceChangeModalProps {
   description: string
   department: string
   currentPrice: number
+  prefillPrice?: number
+  prefillReason?: TrackedItem['reason']
   onClose: () => void
   onSuccess?: () => void
 }
@@ -23,15 +25,20 @@ export default function PriceChangeModal({
   description,
   department,
   currentPrice,
+  prefillPrice,
+  prefillReason,
   onClose,
   onSuccess,
 }: PriceChangeModalProps) {
-  const [newPrice, setNewPrice] = useState('')
-  const [reason, setReason] = useState<TrackedItem['reason']>('other')
+  const [newPrice, setNewPrice] = useState(prefillPrice ? prefillPrice.toFixed(2) : '')
+  const [reason, setReason] = useState<TrackedItem['reason']>(prefillReason ?? 'other')
   const [notes, setNotes] = useState('')
+  const [sendToPos, setSendToPos] = useState(true)
+  const [doPrintLabel, setDoPrintLabel] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<'success' | 'error' | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
+  const [successMsg, setSuccessMsg] = useState('')
 
   if (!open) return null
 
@@ -63,8 +70,22 @@ export default function PriceChangeModal({
     })
 
     try {
-      // 2. Call putPrice
-      await putPrice(itemCode, { newPrice: price, reason })
+      // 2. Call changeAndSend (pushes to registers) or updateBackOfficePrice (back-office only)
+      const effectiveBarcode = barcode || itemCode
+      if (sendToPos) {
+        await changeAndSend(effectiveBarcode, price, reason)
+      } else {
+        await updateBackOfficePrice(effectiveBarcode, price)
+      }
+
+      // 2b. Print label if requested
+      if (doPrintLabel) {
+        try {
+          await printLabel(effectiveBarcode)
+        } catch {
+          // Non-fatal — price change succeeded, label print is best-effort
+        }
+      }
 
       // 3. On success: update TrackedItem
       await db.trackedItems.update(trackedId, {
@@ -73,17 +94,22 @@ export default function PriceChangeModal({
         currentPrice: price,
       })
 
+      const msg = sendToPos
+        ? 'Price updated + sent to registers'
+        : 'Price updated (back-office only)'
+      setSuccessMsg(doPrintLabel ? `${msg} · Label queued` : msg)
       setResult('success')
 
-      // 6. Close after 1 second on success
+      // 6. Close after 1.5 seconds on success
       setTimeout(() => {
         setNewPrice('')
         setNotes('')
         setReason('other')
         setResult(null)
+        setSuccessMsg('')
         onSuccess?.()
         onClose()
-      }, 1000)
+      }, 1500)
     } catch (err) {
       // 4. On failure: update TrackedItem
       const msg = err instanceof Error ? err.message : 'Unknown error'
@@ -170,11 +196,35 @@ export default function PriceChangeModal({
           />
         </div>
 
+        {/* POS & Label toggles */}
+        <div className="space-y-2">
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={sendToPos}
+              onChange={(e) => setSendToPos(e.target.checked)}
+              className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <Send size={14} className="text-gray-400" />
+            Send to POS registers
+          </label>
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={doPrintLabel}
+              onChange={(e) => setDoPrintLabel(e.target.checked)}
+              className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <Tag size={14} className="text-gray-400" />
+            Print shelf label
+          </label>
+        </div>
+
         {/* 5. Success/error inline message */}
         {result === 'success' && (
           <div className="flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 rounded-lg text-sm">
             <Check size={16} />
-            <span>Price updated successfully</span>
+            <span>{successMsg}</span>
           </div>
         )}
         {result === 'error' && (
@@ -195,7 +245,9 @@ export default function PriceChangeModal({
 
         {/* 8. Disclaimer */}
         <p className="text-[11px] text-gray-400 text-center">
-          This will update the POS sell price via JARVISmart
+          {sendToPos
+            ? 'This will update the sell price and push to all registers'
+            : 'This will update the back-office price only'}
         </p>
       </div>
     </div>
