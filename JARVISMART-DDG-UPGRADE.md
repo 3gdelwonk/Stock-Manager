@@ -1,59 +1,59 @@
-# JARVISmart DDG Image Search — Server-Side Query Improvement
+# JARVISmart DDG Image Search — Server-Side Query Improvement (v2)
 
-**Context:** The PWA now sends raw POS description + department to `/api/pos/ddg-images` instead of a pre-built query. The server must expand POS abbreviations and build a smart search query before hitting DDG.
+**Context:** The PWA sends raw POS description + department to `/api/pos/ddg-images`. The server must expand POS abbreviations and build a **short, specific** search query before hitting DDG. Less is more — DDG (backed by Bing) performs best with concise queries, not keyword-stuffed ones.
 
 ## Updated Endpoint: `GET /api/pos/ddg-images`
 
-**New query params** (replaces the old `?q=` param):
+**Query params** (replaces the old `?q=` param):
 - `description` (required) — raw POS description, e.g. `"A/FRSH OLIVES K/MATA PTD 220GM"`
 - `department` (required) — department name, e.g. `"GROCERY"`, `"WINE"`, `"DAIRY"`
 - `barcode` (optional) — product barcode for fallback search
-- `num` (optional, default 5) — max results
+- `num` (optional, default 15) — max results to return
 
 **The server should:**
 
 1. **Expand POS abbreviations** in the description
 2. **Strip volume/weight/pack size** numbers
-3. **Build search query** with department context + "Australia"
-4. Search DDG with the cleaned query
-5. If no results and barcode provided, try `"{barcode} product"` as fallback
+3. **Build a SHORT search query** (brand + product name only, 4-7 words)
+4. **Tiered search**: try specific query first → if <3 results, retry with department keyword
+5. Set DDG `region: 'au-en'` for Australian product results
+6. Score and rank results, return top N
+7. If no results and barcode provided, try `"{barcode} product"` as final fallback
 
-### Department Search Context Map
-
-Use department to add product-category keywords that dramatically improve DDG match rate:
+### Department Context Map (single keyword only)
 
 ```js
 const DEPT_SEARCH_CONTEXT = {
-  'GROCERY':          'grocery food product',
-  'DAIRY':            'dairy product',
-  'FROZEN':           'frozen food product',
-  'FRESH PRODUCE':    'fresh produce fruit vegetable',
-  'FRUIT & VEG':      'fresh fruit vegetable',
-  'MEAT':             'meat product packaged',
-  'BUTCHER':          'meat butcher product',
-  'DELI':             'deli food product',
-  'BAKERY':           'bakery bread product',
-  'HEALTH & BEAUTY':  'health beauty product',
-  'HEALTH':           'health product',
-  'HOUSEHOLD':        'household cleaning product',
-  'PET':              'pet food product',
-  'BABY':             'baby product',
-  'TOBACCO':          'tobacco product',
-  'GENERAL MERCHANDISE': 'product',
-  'LIQUEURS':         'liqueur bottle',
-  'WINE':             'wine bottle',
-  'SPIRITS':          'spirits bottle',
-  'BEER':             'beer product',
-  'LIQUOR/MISC':      'liquor product',
+  'GROCERY':            '',          // no suffix — it's the default/generic category
+  'DAIRY':              'dairy',
+  'FROZEN':             'frozen',
+  'FRESH PRODUCE':      'produce',
+  'FRUIT & VEG':        'produce',
+  'MEAT':               'meat',
+  'BUTCHER':            'meat',
+  'DELI':               'deli',
+  'BAKERY':             'bakery',
+  'HEALTH & BEAUTY':    'health',
+  'HEALTH':             'health',
+  'HOUSEHOLD':          'cleaning',
+  'PET':                'pet food',
+  'BABY':               'baby',
+  'TOBACCO':            'tobacco',
+  'GENERAL MERCHANDISE': '',
+  'LIQUEURS':           'liqueur',
+  'WINE':               'wine',
+  'SPIRITS':            'spirits',
+  'BEER':               'beer',
+  'LIQUOR/MISC':        'liquor',
 };
 
 function getDeptContext(department) {
-  if (!department) return 'product';
-  return DEPT_SEARCH_CONTEXT[department.toUpperCase()] || 'product';
+  if (!department) return '';
+  return DEPT_SEARCH_CONTEXT[department.toUpperCase()] || '';
 }
 ```
 
-### POS Abbreviation Map (add to server code)
+### POS Abbreviation Map
 
 ```js
 const POS_ABBREVIATIONS = {
@@ -76,7 +76,7 @@ const POS_ABBREVIATIONS = {
   'STRPS': 'Strips', 'HLVS': 'Halves', 'WHT': 'White',
   'WHLMEAL': 'Wholemeal', 'ORG': 'Organic', 'XTRA': 'Extra',
   'D/STY': 'Deli Style', 'S/GRN': 'Spanish Green', 'SRIRACHA': 'Sriracha',
-  'SICLN': 'Sicilian', 'SICLN': 'Sicilian', 'GRN': 'Green', 'BLCK': 'Black',
+  'SICLN': 'Sicilian', 'GRN': 'Green', 'BLCK': 'Black',
   'ANCHOV': 'Anchovy', 'TOM': 'Tomato', 'PEPP': 'Pepper',
   'MSTRD': 'Mustard', 'FRT': 'Fruit', 'CONDNSD': 'Condensed',
   'EVAP': 'Evaporated', 'F/C': 'Full Cream', 'S/F': 'Sugar Free',
@@ -89,48 +89,50 @@ const POS_ABBREVIATIONS = {
 function expandPosDescription(desc) {
   let expanded = desc;
   for (const [abbr, full] of Object.entries(POS_ABBREVIATIONS)) {
-    // Word boundary match (case-insensitive)
     const escaped = abbr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     expanded = expanded.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), full);
   }
   return expanded;
 }
+```
 
-function buildImageQuery(description, department, barcode) {
-  if (barcode) return `${barcode} product white background`;
+### Query Building — Short & Specific
 
+**Key principle:** DDG/Bing works best with short queries (4-7 words). Do NOT append "Australia", "white background", "product", or multi-word department phrases. Use `region: 'au-en'` for locale targeting instead.
+
+```js
+function buildImageQueries(description, department) {
   let clean = expandPosDescription(description);
   // Strip volume/weight/pack (handle no-space like "540GM")
-  clean = clean.replace(/\d+[*xX]?\d*\s*ML\b/gi, '');
-  clean = clean.replace(/\d+\s*L\b/gi, '');
-  clean = clean.replace(/\d+\s*(S|PK|X)\b/gi, '');
-  clean = clean.replace(/\d+\s*(GM|KG|G)\b/gi, '');
+  clean = clean.replace(/\d+[*xX]?\d*\s*(ML|L|GM|KG|G|S|PK|X)\b/gi, '');
   clean = clean.replace(/[*#&]/g, '').replace(/\s+/g, ' ').trim();
 
-  // Department-specific context for higher match rate
-  const deptContext = getDeptContext(department);
+  const dept = getDeptContext(department); // single word or empty
 
-  return `${clean} ${deptContext} Australia white background`;
+  return {
+    primary: clean,                                     // e.g. "Always Fresh Olives Kalamata Pitted"
+    withDept: dept ? `${clean} ${dept}` : clean,        // e.g. "Always Fresh Olives Kalamata Pitted dairy"
+  };
 }
 ```
 
-### Updated Route Handler
+### Result Scoring
 
 ```js
-// Score results to prefer clean product images (no background / white background)
 function scoreImageResult(result) {
   let score = 0;
   const url = (result.imageUrl || '').toLowerCase();
   const title = (result.title || '').toLowerCase();
   const source = (result.source || '').toLowerCase();
 
-  // Prefer images from product/retail sites
+  // Prefer images from Australian retail sites
   if (source.includes('woolworths') || source.includes('coles') || source.includes('amazon')
       || source.includes('bigw') || source.includes('chemistwarehouse')
-      || source.includes('danmurphy') || source.includes('bws'))
+      || source.includes('danmurphy') || source.includes('bws')
+      || source.includes('liquorland') || source.includes('iga'))
     score += 3;
 
-  // Prefer PNG (often transparent background)
+  // Prefer PNG (often transparent/white background)
   if (url.endsWith('.png')) score += 2;
 
   // Prefer URLs suggesting product shots
@@ -142,36 +144,59 @@ function scoreImageResult(result) {
   if (source.includes('pinterest') || source.includes('instagram') || source.includes('facebook'))
     score -= 2;
 
+  // Penalize stock photo sites (watermarked, not real products)
+  if (source.includes('shutterstock') || source.includes('istockphoto')
+      || source.includes('gettyimages') || source.includes('depositphotos'))
+    score -= 5;
+
   // Prefer square-ish images (typical product photos)
   if (result.width > 0 && result.height > 0) {
     const ratio = result.width / result.height;
-    if (ratio >= 0.7 && ratio <= 1.4) score += 1; // close to square
+    if (ratio >= 0.7 && ratio <= 1.4) score += 1;
   }
 
   return score;
 }
+```
 
+### Updated Route Handler — Tiered Search
+
+```js
 router.get('/ddg-images', async (req, res) => {
   const { description, department, barcode, num: numStr } = req.query;
-  const num = parseInt(numStr) || 5;
+  const num = parseInt(numStr) || 15;
 
   // Support both old ?q= format and new description/department format
-  let query;
-  if (description) {
-    query = buildImageQuery(description, department || '', null);
-  } else if (req.query.q) {
-    query = req.query.q; // backwards compatible
-  } else {
+  if (!description && !req.query.q) {
     return res.status(400).json({ error: 'Missing description or q parameter', results: [] });
   }
 
   try {
-    // Fetch more results than requested so we can filter/rank
-    let results = await searchDdgImages(query, Math.max(num * 2, 10));
+    let results = [];
 
-    // If no results and barcode provided, try barcode search
-    if (results.length === 0 && barcode) {
-      results = await searchDdgImages(`${barcode} product white background`, Math.max(num * 2, 10));
+    if (description) {
+      const queries = buildImageQueries(description, department || '');
+
+      // Tier 1: Specific query (brand + product name only)
+      results = await searchDdgImages(queries.primary, 20, { region: 'au-en' });
+
+      // Tier 2: If <3 results, retry with department context
+      if (results.length < 3 && queries.withDept !== queries.primary) {
+        const more = await searchDdgImages(queries.withDept, 20, { region: 'au-en' });
+        // Merge, deduplicate by imageUrl
+        const seen = new Set(results.map(r => r.imageUrl));
+        for (const r of more) {
+          if (!seen.has(r.imageUrl)) { results.push(r); seen.add(r.imageUrl); }
+        }
+      }
+
+      // Tier 3: Barcode fallback
+      if (results.length === 0 && barcode) {
+        results = await searchDdgImages(`${barcode} product`, 20, { region: 'au-en' });
+      }
+    } else {
+      // Backwards compatible with old ?q= format
+      results = await searchDdgImages(req.query.q, 20, { region: 'au-en' });
     }
 
     // Score and sort — best product images first
@@ -185,15 +210,31 @@ router.get('/ddg-images', async (req, res) => {
 });
 ```
 
+**Note on `searchDdgImages`:** Pass `region: 'au-en'` to the DDG API call. If using `duckduckgo-images-api` or similar, this maps to the `region` parameter. This targets Australian product results without cluttering the query text with "Australia".
+
 ### Example Transformations
 
-| Raw POS Description | Dept | Expanded Search Query |
-|---|---|---|
-| `A/FRSH OLIVES K/MATA PTD 220GM` | GROCERY | `Always Fresh OLIVES Kalamata Pitted grocery food product Australia white background` |
-| `19 CRIMES HALLOWEEN SHZ 750ML` | WINE | `19 CRIMES HALLOWEEN Shiraz wine bottle Australia white background` |
-| `ABBOTTS BRD S/DOUGH RYE 760GM` | BAKERY | `ABBOTTS Bread Sourdough RYE bakery bread product Australia white background` |
-| `ABC SCE CHILLI XTRA HOT #335ML` | GROCERY | `ABC Sauce CHILLI Extra HOT grocery food product Australia white background` |
-| `A2 MILK FULL CREAM LONG LIF 1L` | DAIRY | `A2 MILK FULL CREAM LONG LIF dairy product Australia white background` |
-| `BC MANINAS SWT PASTRIES 225G` | BAKERY | `Bakers Collection MANINAS Sweet Pastries bakery bread product Australia white background` |
-| `PENFOLDS BIN 389 CAB SHZ 750ML` | WINE | `PENFOLDS BIN 389 Cabernet Shiraz wine bottle Australia white background` |
-| `B/EYE CKN STRIPS 500GM` | FROZEN | `Birds Eye Chicken Strips frozen food product Australia white background` |
+| Raw POS Description | Dept | Primary Query | Fallback (if <3 results) |
+|---|---|---|---|
+| `A/FRSH OLIVES K/MATA PTD 220GM` | GROCERY | `Always Fresh Olives Kalamata Pitted` | (same — GROCERY has no dept keyword) |
+| `19 CRIMES HALLOWEEN SHZ 750ML` | WINE | `19 Crimes Halloween Shiraz` | `19 Crimes Halloween Shiraz wine` |
+| `B/EYE CKN STRIPS 500GM` | FROZEN | `Birds Eye Chicken Strips` | `Birds Eye Chicken Strips frozen` |
+| `A2 MILK FULL CREAM LONG LIF 1L` | DAIRY | `A2 Milk Full Cream Long Life` | `A2 Milk Full Cream Long Life dairy` |
+| `ABBOTTS BRD S/DOUGH RYE 760GM` | BAKERY | `ABBOTTS Bread Sourdough RYE` | `ABBOTTS Bread Sourdough RYE bakery` |
+| `ABC SCE CHILLI XTRA HOT #335ML` | GROCERY | `ABC Sauce Chilli Extra Hot` | (same) |
+| `PENFOLDS BIN 389 CAB SHZ 750ML` | WINE | `Penfolds Bin 389 Cabernet Shiraz` | `Penfolds Bin 389 Cabernet Shiraz wine` |
+| `BC MANINAS SWT PASTRIES 225G` | BAKERY | `Bakers Collection Maninas Sweet Pastries` | `Bakers Collection Maninas Sweet Pastries bakery` |
+
+### Changes from v1
+
+| What | v1 (old) | v2 (new) | Why |
+|------|----------|----------|-----|
+| Query suffix | `grocery food product Australia white background` | (none) | Keyword stuffing hurts DDG/Bing results |
+| Dept context | Multi-word phrases (`grocery food product`) | Single word (`dairy`, `wine`) | Shorter = better match rate |
+| Locale targeting | `"Australia"` in query text | `region: 'au-en'` API parameter | Proper API-level filtering |
+| Search strategy | Single query | Tiered: specific → +dept → barcode | Maximizes chances of finding results |
+| Fetch count | `Math.max(num * 2, 10)` → 10 results | Always 20 results | Bigger pool for scoring |
+| Default num | 5 | 15 | PWA now requests 15 for better selection |
+| Barcode query | `{barcode} product white background` | `{barcode} product` | Simpler = better |
+| Stock photos | No penalty | -5 score penalty | Filter shutterstock/istock/getty |
+| Retail sites | Only 7 sites scored | Added liquorland, iga | Better AU coverage |

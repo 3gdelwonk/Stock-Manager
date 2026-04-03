@@ -1,7 +1,7 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { clearAllData } from '../lib/db'
 import { getStockLevels } from '../lib/jarvis'
-import { prefetchImages, isImageSearchConfigured, clearImageCache, type PrefetchProgress } from '../lib/images'
+import { prefetchImages, isImageSearchConfigured, clearImageCache, clearFailedImageCache, getImageCacheStats, type PrefetchProgress } from '../lib/images'
 import ImportView from './ImportView'
 
 export default function SettingsSheet({ onClose }: { onClose: () => void }) {
@@ -28,7 +28,11 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [prefetching, setPrefetching] = useState(false)
   const [prefetchProgress, setPrefetchProgress] = useState<PrefetchProgress | null>(null)
   const [showImport, setShowImport] = useState(false)
+  const [cacheStats, setCacheStats] = useState<{ total: number; found: number; failed: number } | null>(null)
+  const [searchPriority, setSearchPriority] = useState(() => localStorage.getItem('grocery-manager-search-priority') || 'ddg')
   const abortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => { getImageCacheStats().then(setCacheStats) }, [])
 
   function saveLead() {
     localStorage.setItem('grocery-manager-lead-time', String(leadTime))
@@ -158,6 +162,26 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
             <button onClick={saveSerper} className="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg">Save</button>
           </div>
           <p className="text-xs text-gray-400">Fallback for manual image picker (long-press image). 250 free queries/month.</p>
+          {serperApiKey.trim() && (
+            <div className="mt-2">
+              <label className="text-xs font-medium text-gray-600">Image Search Priority</label>
+              <div className="flex gap-1 mt-1">
+                <button
+                  onClick={() => { setSearchPriority('ddg'); localStorage.setItem('grocery-manager-search-priority', 'ddg') }}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${searchPriority === 'ddg' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}`}
+                >
+                  DDG First (Free)
+                </button>
+                <button
+                  onClick={() => { setSearchPriority('serper'); localStorage.setItem('grocery-manager-search-priority', 'serper') }}
+                  className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${searchPriority === 'serper' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}`}
+                >
+                  Serper First (Paid)
+                </button>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-1">Switch to Serper First if you have a paid Serper plan for higher quality.</p>
+            </div>
+          )}
           {isImageSearchConfigured() && (
             <div className="mt-2">
               <button
@@ -218,12 +242,26 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
           >
             Import Data
           </button>
-          <button
-            onClick={async () => { const n = await clearImageCache(); alert(`Cleared ${n} cached entries. Images will be re-fetched.`) }}
-            className="w-full py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200"
-          >
-            Clear Image Cache
-          </button>
+          {cacheStats && (
+            <p className="text-xs text-gray-500">
+              Image cache: {cacheStats.found} images saved, {cacheStats.failed} not found, {cacheStats.total} total
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={async () => { const n = await clearFailedImageCache(); setCacheStats(await getImageCacheStats()); alert(`Cleared ${n} not-found entries. They will be re-searched next time.`) }}
+              className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-amber-50 text-amber-600 hover:bg-amber-100"
+            >
+              Retry Not-Found{cacheStats ? ` (${cacheStats.failed})` : ''}
+            </button>
+            <button
+              onClick={async () => { const n = await clearImageCache(); setCacheStats({ total: 0, found: 0, failed: 0 }); alert(`Cleared local cache (${n} entries). JARVISmart images are safe — they will be re-downloaded on next fetch.`) }}
+              className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200"
+            >
+              Clear Local{cacheStats ? ` (${cacheStats.total})` : ''}
+            </button>
+          </div>
+          <p className="text-[10px] text-gray-400">Local cache only — JARVISmart server images are never deleted.</p>
         </div>
 
         <div className="border-t border-gray-100 pt-4">

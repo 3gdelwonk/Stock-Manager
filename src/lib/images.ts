@@ -45,6 +45,21 @@ async function pushImageToJarvis(itemCode: string, imageUrl: string): Promise<vo
   } catch { /* best-effort */ }
 }
 
+// ── Placeholder / stock photo filter ───────────────────────────────────────
+
+const PLACEHOLDER_RE = /placeholder|no-?image|default[-_]image|spacer|1x1\.|pixel\.gif/i
+const STOCK_PHOTO_RE = /shutterstock|istockphoto|gettyimages|depositphotos/i
+
+function isPlaceholderUrl(url: string): boolean {
+  return PLACEHOLDER_RE.test(url) || STOCK_PHOTO_RE.test(url)
+}
+
+// ── Search priority config ─────────────────────────────────────────────────
+
+function getSearchPriority(): 'ddg' | 'serper' {
+  return (localStorage.getItem('grocery-manager-search-priority') as 'ddg' | 'serper') || 'ddg'
+}
+
 // ── Query building ──────────────────────────────────────────────────────────
 
 // PWA sends raw POS description + department to JARVISmart server,
@@ -72,7 +87,7 @@ interface DdgResponse { results?: DdgImageResult[]; error?: string }
 
 async function ddgImageSearch(description: string, department: string, barcode?: string | null): Promise<string | null | 'error'> {
   try {
-    const params = new URLSearchParams({ description, department, num: '5' })
+    const params = new URLSearchParams({ description, department, num: '15' })
     if (barcode) params.set('barcode', barcode)
     const res = await fetch(`${getJarvisBaseUrl()}/api/pos/ddg-images?${params}`, {
       headers: { 'X-API-Key': getJarvisApiKey() },
@@ -80,8 +95,10 @@ async function ddgImageSearch(description: string, department: string, barcode?:
     if (!res.ok) return 'error'
     const data: DdgResponse = await res.json()
     if (data.error || !data.results || data.results.length === 0) return null
-    const img = data.results.find(i => (i.width === 0 || i.width >= 100) && (i.height === 0 || i.height >= 100))
-    return img?.imageUrl ?? data.results[0]?.imageUrl ?? null
+    const acceptable = data.results.filter(i =>
+      (i.width === 0 || i.width >= 100) && (i.height === 0 || i.height >= 100) && !isPlaceholderUrl(i.imageUrl)
+    )
+    return acceptable[0]?.imageUrl ?? null
   } catch { return 'error' }
 }
 
@@ -102,7 +119,7 @@ async function serperImageSearch(query: string): Promise<string | null | 'error'
     if (!res.ok) return 'error'
     const data: SerperResponse = await res.json()
     if (!data.images || data.images.length === 0) return null
-    const img = data.images.find(i => i.imageWidth >= 100 && i.imageHeight >= 100)
+    const img = data.images.find(i => i.imageWidth >= 100 && i.imageHeight >= 100 && !isPlaceholderUrl(i.imageUrl))
     return img?.imageUrl ?? data.images[0]?.imageUrl ?? null
   } catch { return 'error' }
 }
@@ -141,29 +158,23 @@ export async function fetchAndCacheImage(
     let imageUrl: string | null = null
     let anySearchWorked = false
 
-    // 2. DDG via JARVISmart server (primary — free & unlimited)
-    // Server handles abbreviation expansion, query building, department context
-    const ddgResult = await ddgImageSearch(description, department, barcode)
-    if (ddgResult !== 'error') {
-      anySearchWorked = true
-      if (ddgResult) imageUrl = ddgResult
+    const tryDdg = async () => {
+      const r = await ddgImageSearch(description, department, barcode)
+      if (r !== 'error') { anySearchWorked = true; if (r) imageUrl = r }
+    }
+    const trySerper = async () => {
+      const r = await serperImageSearch(buildSearchQuery(description, department))
+      if (r !== 'error') { anySearchWorked = true; if (r) imageUrl = r }
+      if (!imageUrl && barcode) {
+        const r2 = await serperImageSearch(buildSearchQuery(description, department, barcode))
+        if (r2 !== 'error') { anySearchWorked = true; if (r2) imageUrl = r2 }
+      }
     }
 
-    // 3. Serper fallback (only if DDG didn't find anything)
-    if (!imageUrl) {
-      const serperResult = await serperImageSearch(buildSearchQuery(description, department))
-      if (serperResult !== 'error') {
-        anySearchWorked = true
-        if (serperResult) imageUrl = serperResult
-      }
-      if (!imageUrl && barcode) {
-        const serperBarcode = await serperImageSearch(buildSearchQuery(description, department, barcode))
-        if (serperBarcode !== 'error') {
-          anySearchWorked = true
-          if (serperBarcode) imageUrl = serperBarcode
-        }
-      }
-    }
+    // 2 & 3. Search in priority order (configurable in Settings)
+    const [primary, fallback] = getSearchPriority() === 'serper' ? [trySerper, tryDdg] : [tryDdg, trySerper]
+    await primary()
+    if (!imageUrl) await fallback()
 
     if (imageUrl) {
       await db.imageCache.put({ itemCode, imageUrl, fetchedAt: new Date() })
@@ -258,6 +269,18 @@ export async function clearImageCache(): Promise<number> {
   const count = await db.imageCache.count()
   await db.imageCache.clear()
   return count
+}
+
+export async function clearFailedImageCache(): Promise<number> {
+  const failed = await db.imageCache.filter(e => e.imageUrl === '').primaryKeys()
+  await db.imageCache.bulkDelete(failed)
+  return failed.length
+}
+
+export async function getImageCacheStats(): Promise<{ total: number; found: number; failed: number }> {
+  const all = await db.imageCache.toArray()
+  const found = all.filter(e => e.imageUrl !== '').length
+  return { total: all.length, found, failed: all.length - found }
 }
 
 // ── Manual image picker (uses Serper for quality) ───────────────────────────
