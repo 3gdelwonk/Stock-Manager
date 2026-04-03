@@ -132,43 +132,53 @@ export async function fetchAndCacheImage(
       return { url: jarvisUrl, allErrored: false }
     }
 
-    // 2. DDG via JARVISmart server (primary — free & unlimited)
     const descQuery = buildSearchQuery(description, department)
-    let ddgResult = await ddgImageSearch(descQuery)
-    if (ddgResult === null && barcode) {
-      ddgResult = await ddgImageSearch(buildSearchQuery(description, department, barcode))
-    }
-    const ddgErrored = ddgResult === 'error'
-    const ddgUrl = ddgErrored ? null : ddgResult
+    let imageUrl: string | null = null
+    let anySearchWorked = false
 
-    // If DDG found something, use it
-    if (ddgUrl) {
-      await db.imageCache.put({ itemCode, imageUrl: ddgUrl, fetchedAt: new Date() })
-      pushImageToJarvis(itemCode, ddgUrl)
-      return { url: ddgUrl, allErrored: false }
+    // 2. DDG via JARVISmart server (primary — free & unlimited)
+    const ddgResult = await ddgImageSearch(descQuery)
+    if (ddgResult !== 'error') {
+      anySearchWorked = true
+      if (ddgResult) imageUrl = ddgResult
+    }
+    if (!imageUrl && barcode) {
+      const ddgBarcode = await ddgImageSearch(buildSearchQuery(description, department, barcode))
+      if (ddgBarcode !== 'error') {
+        anySearchWorked = true
+        if (ddgBarcode) imageUrl = ddgBarcode
+      }
     }
 
     // 3. Serper fallback (only if DDG didn't find anything)
-    let serperResult = await serperImageSearch(descQuery)
-    if (serperResult === null && barcode) {
-      serperResult = await serperImageSearch(buildSearchQuery(description, department, barcode))
+    if (!imageUrl) {
+      const serperResult = await serperImageSearch(descQuery)
+      if (serperResult !== 'error') {
+        anySearchWorked = true
+        if (serperResult) imageUrl = serperResult
+      }
+      if (!imageUrl && barcode) {
+        const serperBarcode = await serperImageSearch(buildSearchQuery(description, department, barcode))
+        if (serperBarcode !== 'error') {
+          anySearchWorked = true
+          if (serperBarcode) imageUrl = serperBarcode
+        }
+      }
     }
-    const serperErrored = serperResult === 'error'
-    const serperUrl = serperErrored ? null : serperResult
 
-    if (serperUrl) {
-      await db.imageCache.put({ itemCode, imageUrl: serperUrl, fetchedAt: new Date() })
-      pushImageToJarvis(itemCode, serperUrl)
-      return { url: serperUrl, allErrored: false }
+    if (imageUrl) {
+      await db.imageCache.put({ itemCode, imageUrl, fetchedAt: new Date() })
+      pushImageToJarvis(itemCode, imageUrl)
+      return { url: imageUrl, allErrored: false }
     }
 
-    // Both searched but no image found (not an error — cache empty so we don't retry)
-    if (!ddgErrored || !serperErrored) {
+    // At least one search worked but found nothing — cache empty to avoid retry
+    if (anySearchWorked) {
       await db.imageCache.put({ itemCode, imageUrl: '', fetchedAt: new Date() })
       return { url: null, allErrored: false }
     }
 
-    // Both errored — don't cache, allow retry later
+    // All sources errored — don't cache, allow retry later
     return { url: null, allErrored: true }
   } catch {
     return { url: null, allErrored: true }
