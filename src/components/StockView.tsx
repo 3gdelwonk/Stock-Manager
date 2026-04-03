@@ -456,6 +456,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
 
   const topSellerCodes = useMemo(() => {
     const set = new Set<string>()
+    if (topSellers.length === 0) return set
     // Top 20% by revenue are "best sellers"
     const sorted = [...topSellers].sort((a, b) => b.revenue - a.revenue)
     const cutoff = Math.max(1, Math.floor(sorted.length * 0.2))
