@@ -132,9 +132,9 @@ export default function CrewPrice() {
           <div className="text-center space-y-4 pt-8">
             <button
               onClick={() => setScannerOpen(true)}
-              className="mx-auto w-24 h-24 rounded-2xl bg-blue-50 flex items-center justify-center hover:bg-blue-100 transition-colors"
+              className="mx-auto w-24 h-24 rounded-2xl bg-emerald-50 flex items-center justify-center hover:bg-emerald-100 transition-colors"
             >
-              <ScanBarcode size={40} className="text-blue-500" />
+              <ScanBarcode size={40} className="text-emerald-500" />
             </button>
             <div>
               <p className="text-sm font-medium text-gray-700">Scan barcode to change price</p>
@@ -162,7 +162,7 @@ export default function CrewPrice() {
               />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900 leading-tight">{product.description}</p>
-                <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+                <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
                   {product.department}
                 </span>
               </div>
@@ -188,7 +188,7 @@ export default function CrewPrice() {
                 value={newPrice}
                 onChange={e => setNewPrice(e.target.value)}
                 placeholder="0.00"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-300"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-300"
               />
             </div>
 
@@ -198,7 +198,7 @@ export default function CrewPrice() {
               <select
                 value={reason}
                 onChange={e => setReason(e.target.value as TrackedItem['reason'])}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300"
               >
                 {PRICE_CHANGE_REASONS.map(r => (
                   <option key={r.value} value={r.value}>{r.label}</option>
@@ -214,7 +214,7 @@ export default function CrewPrice() {
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 placeholder="Add a note..."
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
               />
             </div>
 
@@ -225,7 +225,7 @@ export default function CrewPrice() {
                   type="checkbox"
                   checked={sendToPos}
                   onChange={e => setSendToPos(e.target.checked)}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
                 />
                 <Send size={14} className="text-gray-400" />
                 Send to POS registers
@@ -235,7 +235,7 @@ export default function CrewPrice() {
                   type="checkbox"
                   checked={doPrintLabel}
                   onChange={e => setDoPrintLabel(e.target.checked)}
-                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
                 />
                 <Tag size={14} className="text-gray-400" />
                 Print shelf label
@@ -246,7 +246,7 @@ export default function CrewPrice() {
             <button
               onClick={handleConfirm}
               disabled={submitting || !newPrice || parseFloat(newPrice) <= 0}
-              className="w-full py-3 bg-blue-600 text-white text-sm font-semibold rounded-xl disabled:opacity-50 transition-colors hover:bg-blue-700"
+              className="w-full py-3 bg-emerald-600 text-white text-sm font-semibold rounded-xl disabled:opacity-50 transition-colors hover:bg-emerald-700"
             >
               {submitting ? 'Updating...' : 'Confirm Price Change'}
             </button>
@@ -258,7 +258,7 @@ export default function CrewPrice() {
             {/* Scan another */}
             <button
               onClick={() => { setProduct(null); setResult(null); setScannerOpen(true) }}
-              className="w-full text-xs text-blue-600 font-medium py-1"
+              className="w-full text-xs text-emerald-600 font-medium py-1"
             >
               Scan another product
             </button>

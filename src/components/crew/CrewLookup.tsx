@@ -96,15 +96,15 @@ export default function CrewLookup() {
               placeholder="Scan or search product..."
               value={query}
               onChange={e => setQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
           <button
             type="button"
             onClick={() => setScannerOpen(true)}
-            className="px-3 py-2 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+            className="px-3 py-2 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors"
           >
-            <ScanBarcode size={20} className="text-blue-600" />
+            <ScanBarcode size={20} className="text-emerald-600" />
           </button>
           {query && (
             <button
@@ -145,16 +145,16 @@ export default function CrewLookup() {
               />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900 leading-tight">{selected.description}</p>
-                <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+                <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
                   {selected.department}
                 </span>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-blue-50 rounded-xl p-3 text-center">
-                <p className="text-[10px] text-blue-500 uppercase font-medium">Sell Price</p>
-                <p className="text-xl font-bold text-blue-700">${selected.sellPrice.toFixed(2)}</p>
+              <div className="bg-emerald-50 rounded-xl p-3 text-center">
+                <p className="text-[10px] text-emerald-500 uppercase font-medium">Sell Price</p>
+                <p className="text-xl font-bold text-emerald-700">${selected.sellPrice.toFixed(2)}</p>
               </div>
               <div className={`rounded-xl p-3 text-center ${selected.onHand <= 0 ? 'bg-red-50' : selected.onHand <= selected.reorderLevel ? 'bg-amber-50' : 'bg-green-50'}`}>
                 <p className={`text-[10px] uppercase font-medium ${selected.onHand <= 0 ? 'text-red-500' : selected.onHand <= selected.reorderLevel ? 'text-amber-500' : 'text-green-500'}`}>In Stock</p>
@@ -176,14 +176,14 @@ export default function CrewLookup() {
               {selected.isOnReorder && (
                 <div className="flex justify-between">
                   <span>Status</span>
-                  <span className="font-medium text-blue-600">On Reorder</span>
+                  <span className="font-medium text-emerald-600">On Reorder</span>
                 </div>
               )}
             </div>
 
             <button
               onClick={() => setSelected(null)}
-              className="w-full text-xs text-blue-600 font-medium py-2"
+              className="w-full text-xs text-emerald-600 font-medium py-2"
             >
               Back to results
             </button>
@@ -211,7 +211,7 @@ export default function CrewLookup() {
                   <p className="text-sm font-medium text-gray-900 truncate">{r.description}</p>
                   <p className="text-xs text-gray-400 mt-0.5">{r.department} · QOH {r.onHand}</p>
                 </div>
-                <p className="text-sm font-bold text-blue-600 shrink-0">${r.sellPrice.toFixed(2)}</p>
+                <p className="text-sm font-bold text-emerald-600 shrink-0">${r.sellPrice.toFixed(2)}</p>
               </button>
             ))}
           </div>

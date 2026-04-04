@@ -140,19 +140,19 @@ export default function CrewExpiry() {
               value={barcodeInput}
               onChange={e => setBarcodeInput(e.target.value)}
               onBlur={() => lookupProduct(barcodeInput)}
-              className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
             <button
               onClick={() => setScannerOpen(true)}
-              className="px-3 py-2 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+              className="px-3 py-2 bg-emerald-50 rounded-lg hover:bg-emerald-100 transition-colors"
             >
-              <ScanBarcode size={18} className="text-blue-600" />
+              <ScanBarcode size={18} className="text-emerald-600" />
             </button>
             <button
               onClick={() => lookupProduct(barcodeInput)}
-              className="px-3 py-2 bg-blue-100 rounded-lg hover:bg-blue-200 transition-colors"
+              className="px-3 py-2 bg-emerald-100 rounded-lg hover:bg-emerald-200 transition-colors"
             >
-              <Search size={18} className="text-blue-700" />
+              <Search size={18} className="text-emerald-700" />
             </button>
           </div>
           {lookupDone && !productName && (
@@ -168,7 +168,7 @@ export default function CrewExpiry() {
             placeholder="Product name"
             value={productName}
             onChange={e => setProductName(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
         </div>
 
@@ -178,7 +178,7 @@ export default function CrewExpiry() {
           <select
             value={department}
             onChange={e => setDepartment(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
           >
             <option value="">Select department</option>
             {DEPARTMENT_ORDER.map(d => (
@@ -197,7 +197,7 @@ export default function CrewExpiry() {
                   type="date"
                   value={entry.date}
                   onChange={e => updateEntry(idx, 'date', e.target.value)}
-                  className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
                 <input
                   type="number"
@@ -205,7 +205,7 @@ export default function CrewExpiry() {
                   value={entry.qty}
                   onChange={e => updateEntry(idx, 'qty', Math.max(1, parseInt(e.target.value) || 1))}
                   placeholder="Qty"
-                  className="w-20 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
+                  className="w-20 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-center"
                 />
                 {entries.length > 1 && (
                   <button onClick={() => removeEntry(idx)} className="p-1.5 text-gray-400 hover:text-red-500">
@@ -218,7 +218,7 @@ export default function CrewExpiry() {
           {entries.length < 2 && (
             <button
               onClick={addEntry}
-              className="mt-2 text-xs font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1"
+              className="mt-2 text-xs font-medium text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
             >
               <Plus size={14} /> Add another expiry date
             </button>
@@ -233,7 +233,7 @@ export default function CrewExpiry() {
             placeholder="Aisle / Bay / Shelf"
             value={location}
             onChange={e => setLocation(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
         </div>
 
@@ -245,7 +245,7 @@ export default function CrewExpiry() {
             value={notes}
             onChange={e => setNotes(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
           />
         </div>
       </div>
@@ -255,7 +255,7 @@ export default function CrewExpiry() {
         <button
           onClick={handleAdd}
           disabled={saving || !productName.trim() || validEntries.length === 0}
-          className="w-full py-3 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+          className="w-full py-3 text-sm font-semibold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
         >
           {saving ? (
             <span className="animate-pulse">Adding...</span>

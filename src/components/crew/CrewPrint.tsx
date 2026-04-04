@@ -76,9 +76,9 @@ export default function CrewPrint() {
           <div className="text-center space-y-4 pt-8">
             <button
               onClick={() => setScannerOpen(true)}
-              className="mx-auto w-24 h-24 rounded-2xl bg-blue-50 flex items-center justify-center hover:bg-blue-100 transition-colors"
+              className="mx-auto w-24 h-24 rounded-2xl bg-emerald-50 flex items-center justify-center hover:bg-emerald-100 transition-colors"
             >
-              <ScanBarcode size={40} className="text-blue-500" />
+              <ScanBarcode size={40} className="text-emerald-500" />
             </button>
             <div>
               <p className="text-sm font-medium text-gray-700">Scan barcode to print label</p>
@@ -106,10 +106,10 @@ export default function CrewPrint() {
               />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900 leading-tight">{product.description}</p>
-                <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">
+                <span className="inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">
                   {product.department}
                 </span>
-                <p className="text-lg font-bold text-blue-600 mt-1">${product.sellPrice.toFixed(2)}</p>
+                <p className="text-lg font-bold text-emerald-600 mt-1">${product.sellPrice.toFixed(2)}</p>
               </div>
             </div>
 
@@ -137,7 +137,7 @@ export default function CrewPrint() {
             <button
               onClick={handlePrint}
               disabled={printing}
-              className="w-full py-3.5 text-sm font-semibold text-white bg-blue-600 rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+              className="w-full py-3.5 text-sm font-semibold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
             >
               {printing ? (
                 <span className="animate-pulse">Printing...</span>
@@ -151,7 +151,7 @@ export default function CrewPrint() {
             {/* Scan another */}
             <button
               onClick={() => { setProduct(null); setResult(null); setScannerOpen(true) }}
-              className="w-full text-xs text-blue-600 font-medium py-2"
+              className="w-full text-xs text-emerald-600 font-medium py-2"
             >
               Scan another product
             </button>

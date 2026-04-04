@@ -21,7 +21,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
         <div className="flex flex-col items-center justify-center h-full gap-3 p-6 text-center">
           <p className="text-sm font-medium text-red-600">Something went wrong</p>
           <p className="text-xs text-gray-400">{this.state.message}</p>
-          <button onClick={() => window.location.reload()} className="text-sm text-blue-600 underline">Reload</button>
+          <button onClick={() => window.location.reload()} className="text-sm text-emerald-600 underline">Reload</button>
         </div>
       )
     }
@@ -73,7 +73,7 @@ export default function CrewApp() {
     <div className="flex flex-col h-screen-safe max-w-[480px] mx-auto bg-white relative">
       <header className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white shrink-0">
         <h1 className="text-base font-semibold text-gray-900">{TAB_TITLES[activeTab]}</h1>
-        <span className="text-[10px] font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">CREW</span>
+        <span className="text-[10px] font-semibold px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full">CREW</span>
       </header>
 
       <main className="flex-1 overflow-auto relative">
@@ -85,7 +85,7 @@ export default function CrewApp() {
           <button
             key={tab.id}
             onClick={() => handleTabChange(tab.id)}
-            className={`flex-1 flex flex-col items-center py-1.5 gap-0.5 text-[10px] font-medium transition-colors ${activeTab === tab.id ? 'text-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 flex flex-col items-center py-1.5 gap-0.5 text-[10px] font-medium transition-colors ${activeTab === tab.id ? 'text-emerald-600' : 'text-gray-500 hover:text-gray-700'}`}
           >
             {tab.icon}
             {tab.label}
