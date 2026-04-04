@@ -10,7 +10,8 @@ import {
   type StockItem, type LivePromotion, type TopSeller, type OrderInfo,
 } from '../lib/jarvis'
 import { resolveBarcode, getAliasesForItem, setPrimaryBarcode } from '../lib/barcodeResolver'
-import type { BarcodeAlias } from '../lib/db'
+import { db, type BarcodeAlias } from '../lib/db'
+import { MapPin, Pencil, Check } from 'lucide-react'
 import { useProductExpiry, type ExpiryInfo } from '../lib/useProductExpiry'
 import { prefetchImages, type PrefetchProgress } from '../lib/images'
 import { computeImagePriority } from '../lib/serper'
@@ -87,6 +88,32 @@ function StockCard({
   const orderFetched = useRef(false)
   const [aliases, setAliases] = useState<BarcodeAlias[]>([])
   const aliasesFetched = useRef(false)
+
+  // Location state
+  const [locEdit, setLocEdit] = useState(false)
+  const [loc, setLoc] = useState({ aisle: '', bay: '', shelf: '', section: '' })
+  const locLoaded = useRef(false)
+
+  useEffect(() => {
+    if (expanded && !locLoaded.current) {
+      locLoaded.current = true
+      const bc = stock.barcode || stock.itemCode
+      db.products.where('barcode').equals(bc).first().then(p => {
+        if (p) setLoc({ aisle: p.aisle || '', bay: p.bay || '', shelf: p.shelf || '', section: p.section || '' })
+      })
+    }
+  }, [expanded, stock.barcode, stock.itemCode])
+
+  async function saveLoc() {
+    const bc = stock.barcode || stock.itemCode
+    const p = await db.products.where('barcode').equals(bc).first()
+    if (p?.id) {
+      await db.products.update(p.id, { aisle: loc.aisle, bay: loc.bay, shelf: loc.shelf, section: loc.section, updatedAt: new Date() })
+    }
+    setLocEdit(false)
+    setActionMsg('Location saved')
+    setTimeout(() => setActionMsg(null), 2000)
+  }
 
   const lowStock = stock.onHand > 0 && stock.onHand <= stock.reorderLevel
   const outOfStock = stock.onHand <= 0
@@ -301,6 +328,40 @@ function StockCard({
                       <span className="text-gray-300">|</span>
                       <span>${sup.ctnCost.toFixed(2)}/{sup.ctnQty}pk</span>
                     </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Location */}
+          <div className="bg-gray-50 rounded-lg px-3 py-2">
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-1 text-[10px] font-semibold text-gray-500 uppercase">
+                <MapPin size={10} /> Location
+              </div>
+              {locEdit ? (
+                <button onClick={saveLoc} className="text-emerald-600 hover:text-emerald-700"><Check size={14} /></button>
+              ) : (
+                <button onClick={() => setLocEdit(true)} className="text-gray-400 hover:text-gray-600"><Pencil size={12} /></button>
+              )}
+            </div>
+            {locEdit ? (
+              <div className="grid grid-cols-4 gap-1.5">
+                {(['aisle', 'bay', 'shelf', 'section'] as const).map(f => (
+                  <div key={f}>
+                    <label className="text-[9px] text-gray-400 capitalize">{f}</label>
+                    <input value={loc[f]} onChange={e => setLoc({ ...loc, [f]: e.target.value })}
+                      className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center focus:ring-1 focus:ring-emerald-400 outline-none" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 gap-1.5 text-xs text-gray-600">
+                {(['aisle', 'bay', 'shelf', 'section'] as const).map(f => (
+                  <div key={f} className="text-center">
+                    <span className="text-[9px] text-gray-400 capitalize block">{f}</span>
+                    <span className="font-medium">{loc[f] || '—'}</span>
                   </div>
                 ))}
               </div>

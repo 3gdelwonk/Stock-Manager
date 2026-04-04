@@ -240,10 +240,18 @@ export interface Supplier {
   createdAt: string
 }
 
+// ─── Connection Log ──────────────────────────────────────────────────────
+export interface ConnectionLogEntry {
+  id?: number
+  connected: boolean
+  reason?: string
+  checkedAt: Date
+}
+
 // ─── Quick Action Log ────────────────────────────────────────────────────
 export interface QuickActionLogEntry {
   id?: number
-  actionType: 'price-change' | 'stock-adjust' | 'expiry-batch' | 'waste-log' | 'label-print' | 'price-check'
+  actionType: 'price-change' | 'stock-adjust' | 'expiry-batch' | 'waste-log' | 'label-print' | 'price-check' | 'promo-create'
   barcode: string
   productName: string
   details: Record<string, unknown>

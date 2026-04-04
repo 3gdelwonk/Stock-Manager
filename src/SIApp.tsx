@@ -1,4 +1,5 @@
 import { useState, useEffect, Component, type ReactNode } from 'react'
+import { useConnectionMonitor } from './lib/useConnectionMonitor'
 import SISidebar, { type SIView } from './components/si/SISidebar'
 import SITopbar from './components/si/SITopbar'
 import SIMobileMenu from './components/si/SIMobileMenu'
@@ -7,6 +8,8 @@ import QuickStock from './components/si/QuickStock'
 import CalendarView from './components/si/CalendarView'
 import InsightsPlaceholder from './components/si/InsightsPlaceholder'
 import GmailScoutPlaceholder from './components/si/GmailScoutPlaceholder'
+import AuditView from './components/si/AuditView'
+import CustomerManager from './components/si/CustomerManager'
 
 const STORAGE_KEY = 'si-app-last-view'
 
@@ -16,6 +19,8 @@ const VIEW_TITLES: Record<SIView, string> = {
   quickstock: 'Quick Stock',
   calendar: 'Calendar',
   gmail: 'Gmail Scout',
+  audit: 'Audit Trail',
+  customers: 'Customer Manager',
 }
 
 function getView(): SIView {
@@ -49,6 +54,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 export default function SIApp() {
   const [activeView, setActiveView] = useState<SIView>(getView)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const conn = useConnectionMonitor()
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, activeView)
@@ -66,12 +72,14 @@ export default function SIApp() {
       case 'quickstock': return <QuickStock />
       case 'calendar': return <CalendarView />
       case 'gmail': return <GmailScoutPlaceholder />
+      case 'audit': return <AuditView />
+      case 'customers': return <CustomerManager />
     }
   })()
 
   return (
     <div className="flex h-screen bg-[#f8faf9] overflow-hidden">
-      <SISidebar activeView={activeView} onNavigate={navigate} />
+      <SISidebar activeView={activeView} onNavigate={navigate} connected={conn.connected} />
 
       <div className="flex-1 flex flex-col min-w-0">
         <SITopbar

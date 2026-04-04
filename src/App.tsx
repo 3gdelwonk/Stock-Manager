@@ -2,6 +2,9 @@
 import { Component, useState, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { LayoutDashboard, Warehouse, Clock, BarChart2, Lightbulb, Settings, Plus } from 'lucide-react'
+import { useConnectionMonitor } from './lib/useConnectionMonitor'
+import ConnectionStatusBadge from './components/ConnectionStatusBadge'
+import ConnectionHistorySheet from './components/ConnectionHistorySheet'
 import Dashboard from './components/Dashboard'
 import StockView from './components/StockView'
 import ExpiryView from './components/ExpiryView'
@@ -85,6 +88,8 @@ export default function App() {
     return saved && TABS.some(t => t.id === saved) ? saved : 'dashboard'
   })
   const [showSettings, setShowSettings] = useState(false)
+  const [showConnHistory, setShowConnHistory] = useState(false)
+  const conn = useConnectionMonitor()
   const [stockAction, setStockAction] = useState<'scan' | 'search' | null>(null)
 
   // ── Global quick actions state ──
@@ -122,6 +127,7 @@ export default function App() {
       <header className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-white shrink-0">
         <h1 className="text-base font-semibold text-gray-900">{TAB_TITLES[activeTab]}</h1>
         <div className="flex items-center gap-1">
+          <ConnectionStatusBadge connected={conn.connected} compact onClick={() => setShowConnHistory(true)} />
           <button
             onClick={() => setQuickActionsOpen(true)}
             className="p-1.5 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
@@ -155,6 +161,7 @@ export default function App() {
       </nav>
 
       {/* ── Global modals ── */}
+      <ConnectionHistorySheet open={showConnHistory} onClose={() => setShowConnHistory(false)} />
       {showSettings && <SettingsSheet onClose={() => setShowSettings(false)} />}
 
       <QuickActionsSheet

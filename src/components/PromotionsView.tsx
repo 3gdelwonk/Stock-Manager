@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { RefreshCw, WifiOff, Tag, Search, ScanBarcode, X, AlertTriangle, Calendar } from 'lucide-react'
+import { RefreshCw, WifiOff, Tag, Search, ScanBarcode, X, AlertTriangle, Calendar, Plus } from 'lucide-react'
 import { checkConnection, getPromotions, getStockLevels, type LivePromotion } from '../lib/jarvis'
 import { useTrackedItemCodes } from '../lib/useTrackedItems'
 import BarcodeScanner from './BarcodeScanner'
+import CreatePromoSheet from './CreatePromoSheet'
 import BarcodeStripe from './BarcodeStripe'
 import ProductImage from './ProductImage'
 
@@ -175,6 +176,7 @@ export default function PromotionsView() {
   const [deptFilter, setDeptFilter] = useState('All')
   const [sortKey, setSortKey] = useState<SortKey>('discount')
   const [scannerOpen, setScannerOpen] = useState(false)
+  const [createPromoOpen, setCreatePromoOpen] = useState(false)
 
   const [expiringSoonCount, setExpiringSoonCount] = useState(0)
 
@@ -539,11 +541,26 @@ export default function PromotionsView() {
         )}
       </div>
 
+      {/* ── FAB: Create promo ─────────────────────────────────────────── */}
+      <button
+        onClick={() => setCreatePromoOpen(true)}
+        className="absolute bottom-4 right-4 w-12 h-12 bg-amber-500 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-amber-600 active:scale-95 transition-transform"
+        aria-label="Create promotion"
+      >
+        <Plus size={24} />
+      </button>
+
       {/* ── Barcode scanner overlay ─────────────────────────────────── */}
       <BarcodeScanner
         open={scannerOpen}
         onScan={handleBarcodeScan}
         onClose={() => setScannerOpen(false)}
+      />
+
+      <CreatePromoSheet
+        open={createPromoOpen}
+        onClose={() => setCreatePromoOpen(false)}
+        onSuccess={() => { setCreatePromoOpen(false); fetchData(true) }}
       />
     </div>
   )

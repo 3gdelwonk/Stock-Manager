@@ -964,3 +964,39 @@ export async function identifyProduct(imageBase64: string): Promise<{
 }> {
   return jarvisMutate('/api/pos/identify-product', 'POST', { image: imageBase64 })
 }
+
+// ── Customer Accounts ────────────────────────────────────────────────────────
+
+export interface CustomerAccount {
+  accountNumber: string
+  name: string
+  balance: number
+  creditLimit: number
+  phone?: string
+  email?: string
+  active: boolean
+}
+
+export interface CustomerTransaction {
+  id: string
+  date: string
+  type: string
+  amount: number
+  description: string
+  reference?: string
+  balance: number
+}
+
+export async function getAccounts(): Promise<CustomerAccount[]> {
+  const data = await jarvisFetch<{ accounts: CustomerAccount[] } | CustomerAccount[]>(
+    '/api/pos/accounts'
+  )
+  return Array.isArray(data) ? data : data.accounts
+}
+
+export async function getAccountTransactions(accountNumber: string): Promise<CustomerTransaction[]> {
+  const data = await jarvisFetch<{ transactions: CustomerTransaction[] } | CustomerTransaction[]>(
+    `/api/pos/accounts/${encodeURIComponent(accountNumber)}/transactions`
+  )
+  return Array.isArray(data) ? data : data.transactions
+}

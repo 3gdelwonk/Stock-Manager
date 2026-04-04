@@ -1,10 +1,11 @@
-import { Clock, Lightbulb, Zap, Calendar, Mail, Activity } from 'lucide-react'
+import { Clock, Lightbulb, Zap, Calendar, Mail, Wifi, WifiOff, ClipboardList, Users } from 'lucide-react'
 
-export type SIView = 'expiry' | 'insights' | 'quickstock' | 'calendar' | 'gmail'
+export type SIView = 'expiry' | 'insights' | 'quickstock' | 'calendar' | 'gmail' | 'audit' | 'customers'
 
 interface SISidebarProps {
   activeView: SIView
   onNavigate: (view: SIView) => void
+  connected?: boolean | null
 }
 
 const NAV_SECTIONS: { label: string; items: { id: SIView; label: string; icon: typeof Clock; badge?: string }[] }[] = [
@@ -13,12 +14,19 @@ const NAV_SECTIONS: { label: string; items: { id: SIView; label: string; icon: t
     items: [
       { id: 'expiry', label: 'Expiry Watch', icon: Clock },
       { id: 'insights', label: 'Insights', icon: Lightbulb, badge: 'P2' },
+      { id: 'audit', label: 'Audit Trail', icon: ClipboardList },
     ],
   },
   {
     label: 'ACTIONS',
     items: [
       { id: 'quickstock', label: 'Quick Stock', icon: Zap },
+    ],
+  },
+  {
+    label: 'ACCOUNTS',
+    items: [
+      { id: 'customers', label: 'Customer Manager', icon: Users },
     ],
   },
   {
@@ -30,7 +38,10 @@ const NAV_SECTIONS: { label: string; items: { id: SIView; label: string; icon: t
   },
 ]
 
-export default function SISidebar({ activeView, onNavigate }: SISidebarProps) {
+export default function SISidebar({ activeView, onNavigate, connected }: SISidebarProps) {
+  const ConnIcon = connected === false ? WifiOff : Wifi
+  const connColor = connected === null ? 'text-slate-400' : connected ? 'text-emerald-400' : 'text-red-400'
+  const connLabel = connected === null ? 'Checking...' : connected ? 'POS Connected' : 'POS Offline'
   return (
     <>
       {/* Full sidebar (lg+) */}
@@ -79,9 +90,9 @@ export default function SISidebar({ activeView, onNavigate }: SISidebarProps) {
 
         {/* Footer */}
         <div className="px-4 py-3 border-t border-slate-700/50">
-          <div className="flex items-center gap-2 text-[11px] text-slate-400">
-            <Activity size={12} className="text-emerald-400" />
-            <span>Connected</span>
+          <div className={`flex items-center gap-2 text-[11px] ${connColor}`}>
+            <ConnIcon size={12} />
+            <span>{connLabel}</span>
           </div>
         </div>
       </aside>
