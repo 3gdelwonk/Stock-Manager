@@ -481,6 +481,8 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
   // try server-side lookup to resolve to an itemCode
   const [orderCodeItemCode, setOrderCodeItemCode] = useState<string | null>(null)
   const orderCodeSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [aliasItemCode, setAliasItemCode] = useState<string | null>(null)
+  const aliasSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── Image auto-prefetch ──
   const [imgProgress, setImgProgress] = useState<PrefetchProgress | null>(null)
@@ -645,8 +647,8 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       // Barcode not in stock list — try alias resolver (checks DB + API search)
       const resolved = await resolveBarcode(normalized, stockItems)
       if (resolved) {
-        // Search by primary barcode or item code so the stock list filters to it
-        setSearch(resolved.primaryBarcode || resolved.itemCode)
+        // Use itemCode for search — guaranteed to match in the stock list
+        setSearch(resolved.itemCode)
       } else {
         setSearch(normalized || trimmed)
       }
@@ -709,6 +711,25 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, stockItems.length > 0])
 
+  // ── Barcode alias lookup (debounced) ──
+  // When search is a long numeric barcode that doesn't match locally,
+  // try resolving it via the alias DB + API search
+  useEffect(() => {
+    if (aliasSearchRef.current) clearTimeout(aliasSearchRef.current)
+    setAliasItemCode(null)
+    const q = search.trim()
+    // Only trigger for 8+ digit numeric codes that don't match any local barcode
+    if (!/^\d{8,}$/.test(q) || stockItems.length === 0) return
+    const hasLocalMatch = stockItems.some(s => s.barcode === q)
+    if (hasLocalMatch) return
+    aliasSearchRef.current = setTimeout(async () => {
+      const resolved = await resolveBarcode(q, stockItems)
+      if (resolved) setAliasItemCode(resolved.itemCode)
+    }, 300)
+    return () => { if (aliasSearchRef.current) clearTimeout(aliasSearchRef.current) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, stockItems.length > 0])
+
   // ── Filter + sort ──
   const filteredItems = useMemo(() => {
     const q = search.toLowerCase().trim()
@@ -719,12 +740,14 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       filtered = filtered.filter(e => e.stock.department === deptFilter)
     }
 
-    // Search (supports name, barcode, POS item code)
+    // Search (supports name, barcode, POS item code, alias resolution)
     if (q) {
       filtered = filtered.filter(e => {
         const s = e.stock
         // If order code resolved via API, match that itemCode
         if (orderCodeItemCode && s.itemCode === orderCodeItemCode) return true
+        // If barcode alias resolved, match that itemCode
+        if (aliasItemCode && s.itemCode === aliasItemCode) return true
         return s.description.toLowerCase().includes(q) ||
           s.itemCode.toLowerCase().includes(q) ||
           (s.barcode && s.barcode.includes(search))
@@ -741,7 +764,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       }
     })
     return sorted
-  }, [enrichedItems, search, deptFilter, sortKey, orderCodeItemCode])
+  }, [enrichedItems, search, deptFilter, sortKey, orderCodeItemCode, aliasItemCode])
 
   // ── Loading ──
   if (loading && stockItems.length === 0) {

@@ -51,10 +51,18 @@ export async function resolveBarcode(
     const result = await searchItems(code, 1)
     if (result.items && result.items.length > 0) {
       const item = result.items[0]
-      const primaryBarcode = item.barcode || code
 
-      // If the scanned barcode differs from what the API considers primary,
-      // save it as an alias
+      // The search endpoint may return the scanned barcode, not the stock endpoint's primary.
+      // Look up the stock data by itemCode to find the true primary barcode.
+      let primaryBarcode = item.barcode || code
+      if (stockItems) {
+        const stockMatch = stockItems.find(s => s.itemCode === item.itemCode)
+        if (stockMatch?.barcode) {
+          primaryBarcode = stockMatch.barcode
+        }
+      }
+
+      // Save alias if scanned barcode differs from primary
       if (primaryBarcode !== code) {
         await saveAlias(code, item.itemCode, primaryBarcode, item.description)
       }

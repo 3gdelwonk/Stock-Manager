@@ -391,7 +391,25 @@ export async function getStockLevels(filters: StockFilters = {}): Promise<StockI
 
 export async function searchItems(query: string, limit = 20): Promise<SearchResult> {
   const params = new URLSearchParams({ q: query, limit: String(limit) })
-  return jarvisFetch<SearchResult>(`/api/pos/search?${params}`)
+  const raw = await jarvisFetch<{ items: RawStockItem[]; count: number }>(`/api/pos/search?${params}`)
+  return {
+    items: (raw.items || []).map(s => ({
+      itemCode:       s.ItemCode,
+      barcode:        s.barcode ?? (s as unknown as Record<string, string>).BarCode ?? null,
+      description:    s.ItemDescription?.trim() ?? '',
+      department:     s.DepartmentName ?? '',
+      departmentCode: s.DepartmentCode ?? 0,
+      onHand:         s.QOH ?? 0,
+      reorderLevel:   s.MinOH ?? 0,
+      sellPrice:      s.RegSellPrice ?? 0,
+      avgCost:        s.AvgCost ?? 0,
+      onOrder:        s.OnOrder ?? 0,
+      isOnReorder:    s.IsOnReorder ?? false,
+      avgDayQty:      s.AvgDayQty ?? null,
+      avgWeekQty:     s.AvgWeekQty ?? null,
+    })),
+    total: raw.count ?? 0,
+  }
 }
 
 // ── Order / Supplier info ──────────────────────────────────────────────────
