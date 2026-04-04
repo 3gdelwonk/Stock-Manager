@@ -20,8 +20,7 @@ export default function AddBatchSheet({ open, onClose, initialBarcode, initialPr
   const [productName, setProductName] = useState('')
   const [department, setDepartment] = useState('')
   const [location, setLocation] = useState('')
-  const [expiryDate, setExpiryDate] = useState('')
-  const [qtyReceived, setQtyReceived] = useState(1)
+  const [entries, setEntries] = useState<{ date: string; qty: number }[]>([{ date: '', qty: 1 }])
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
   const [lookupDone, setLookupDone] = useState(false)
@@ -90,24 +89,40 @@ export default function AddBatchSheet({ open, onClose, initialBarcode, initialPr
     lookupProduct(code)
   }
 
+  function updateEntry(idx: number, field: 'date' | 'qty', value: string | number) {
+    setEntries(prev => prev.map((e, i) => i === idx ? { ...e, [field]: value } : e))
+  }
+
+  function addEntry() {
+    if (entries.length < 2) setEntries(prev => [...prev, { date: '', qty: 1 }])
+  }
+
+  function removeEntry(idx: number) {
+    if (entries.length > 1) setEntries(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  const validEntries = entries.filter(e => e.date && e.qty >= 1)
+
   async function handleAdd() {
-    if (!productName.trim() || !expiryDate || qtyReceived < 1) return
+    if (!productName.trim() || validEntries.length === 0) return
     setSaving(true)
     try {
       const today = new Date().toISOString().split('T')[0]
-      await addExpiryBatch({
-        barcode: barcodeInput.trim(),
-        itemCode: '',
-        productName: productName.trim(),
-        department: department || 'other',
-        expiryDate,
-        qtyReceived,
-        qtyRemaining: qtyReceived,
-        status: 'active',
-        location: location.trim() || undefined,
-        receivedDate: today,
-        notes: notes.trim() || undefined,
-      })
+      for (const entry of validEntries) {
+        await addExpiryBatch({
+          barcode: barcodeInput.trim(),
+          itemCode: '',
+          productName: productName.trim(),
+          department: department || 'other',
+          expiryDate: entry.date,
+          qtyReceived: entry.qty,
+          qtyRemaining: entry.qty,
+          status: 'active',
+          location: location.trim() || undefined,
+          receivedDate: today,
+          notes: notes.trim() || undefined,
+        })
+      }
       onClose()
     } catch (e) {
       console.error('Failed to add batch:', e)
@@ -197,27 +212,42 @@ export default function AddBatchSheet({ open, onClose, initialBarcode, initialPr
             </select>
           </div>
 
-          {/* Expiry date */}
+          {/* Expiry entries */}
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Expiry Date</label>
-            <input
-              type="date"
-              value={expiryDate}
-              onChange={e => setExpiryDate(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
-
-          {/* Quantity received */}
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Quantity Received</label>
-            <input
-              type="number"
-              min={1}
-              value={qtyReceived}
-              onChange={e => setQtyReceived(Math.max(1, parseInt(e.target.value) || 1))}
-              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
+            <label className="block text-xs font-medium text-gray-700 mb-1">Expiry Date & Quantity</label>
+            <div className="space-y-2">
+              {entries.map((entry, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={entry.date}
+                    onChange={e => updateEntry(idx, 'date', e.target.value)}
+                    className="flex-1 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    value={entry.qty}
+                    onChange={e => updateEntry(idx, 'qty', Math.max(1, parseInt(e.target.value) || 1))}
+                    placeholder="Qty"
+                    className="w-20 px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-center"
+                  />
+                  {entries.length > 1 && (
+                    <button onClick={() => removeEntry(idx)} className="p-1.5 text-gray-400 hover:text-red-500">
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {entries.length < 2 && (
+              <button
+                onClick={addEntry}
+                className="mt-2 text-xs font-medium text-emerald-600 hover:text-emerald-700 flex items-center gap-1"
+              >
+                <Plus size={14} /> Add another expiry date
+              </button>
+            )}
           </div>
 
           {/* Location (auto-filled or manual) */}
@@ -249,14 +279,14 @@ export default function AddBatchSheet({ open, onClose, initialBarcode, initialPr
         <div className="px-4 py-4 border-t border-gray-100 shrink-0">
           <button
             onClick={handleAdd}
-            disabled={saving || !productName.trim() || !expiryDate || qtyReceived < 1}
+            disabled={saving || !productName.trim() || validEntries.length === 0}
             className="w-full py-3 text-sm font-semibold text-white bg-emerald-600 rounded-xl hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {saving ? (
               <span className="animate-pulse">Adding...</span>
             ) : (
               <>
-                <Plus size={16} /> Add Batch
+                <Plus size={16} /> Add {validEntries.length > 1 ? `${validEntries.length} Batches` : 'Batch'}
               </>
             )}
           </button>
