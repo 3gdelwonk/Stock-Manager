@@ -109,6 +109,24 @@ export async function markAsSold(batchId: number, qty: number): Promise<void> {
   })
 }
 
+// ─── Mark as Claimed ──────────────────────────────────────────────────────
+
+export async function markAsClaimed(batchId: number): Promise<void> {
+  const batch = await db.expiryBatches.get(batchId)
+  if (!batch) throw new Error('Batch not found')
+  await db.expiryBatches.update(batchId, {
+    status: 'claimed',
+    updatedAt: new Date(),
+  })
+  // Update any pending waste log entries for this batch to submitted
+  const wasteEntries = await db.wasteLog.where('batchId').equals(batchId).toArray()
+  for (const entry of wasteEntries) {
+    if (entry.claimStatus === 'pending' && entry.id) {
+      await db.wasteLog.update(entry.id, { claimStatus: 'submitted' })
+    }
+  }
+}
+
 // ─── Extend Expiry ────────────────────────────────────────────────────────
 
 export async function extendExpiry(batchId: number, newDate: string): Promise<void> {

@@ -2,7 +2,8 @@ import Dexie, { type EntityTable } from 'dexie'
 import type {
   Product, StockSnapshot, SalesRecord, Promotion,
   ExpiryBatch, WasteLogEntry, TrackedItem, TrackedPromo, ImportLogEntry,
-  PromoROICacheEntry,
+  PromoROICacheEntry, Insight, CalendarEvent, GmailExtraction, Supplier,
+  QuickActionLogEntry,
 } from './types'
 
 export interface ImageCacheEntry {
@@ -28,6 +29,11 @@ class GroceryManagerDB extends Dexie {
   imageCache!: EntityTable<ImageCacheEntry, 'itemCode'>
   promoROICache!: EntityTable<PromoROICacheEntry, 'id'>
   serperSearched!: EntityTable<SerperSearchedEntry, 'itemCode'>
+  insights!: EntityTable<Insight, 'id'>
+  calendarEvents!: EntityTable<CalendarEvent, 'id'>
+  gmailExtractions!: EntityTable<GmailExtraction, 'id'>
+  suppliers!: EntityTable<Supplier, 'id'>
+  quickActionLog!: EntityTable<QuickActionLogEntry, 'id'>
 
   constructor() {
     super('GroceryManagerDB')
@@ -49,6 +55,13 @@ class GroceryManagerDB extends Dexie {
     this.version(3).stores({
       serperSearched: 'itemCode',
     })
+    this.version(4).stores({
+      insights:          '++id, type, status, createdAt',
+      calendarEvents:    '++id, date, type, supplier, source',
+      gmailExtractions:  '++id, gmailMessageId, supplier, extractionType, status, receivedAt',
+      suppliers:         '++id, name, type',
+      quickActionLog:    '++id, actionType, barcode, performedAt, syncStatus',
+    })
   }
 }
 
@@ -59,12 +72,15 @@ export async function clearAllData(): Promise<void> {
     db.products, db.stockSnapshots, db.salesRecords, db.promotions,
     db.expiryBatches, db.wasteLog, db.trackedItems, db.trackedPromos,
     db.importLog, db.imageCache, db.promoROICache, db.serperSearched,
+    db.insights, db.calendarEvents, db.gmailExtractions, db.suppliers, db.quickActionLog,
   ], async () => {
     await Promise.all([
       db.products.clear(), db.stockSnapshots.clear(), db.salesRecords.clear(),
       db.promotions.clear(), db.expiryBatches.clear(), db.wasteLog.clear(),
       db.trackedItems.clear(), db.trackedPromos.clear(), db.importLog.clear(),
       db.imageCache.clear(), db.promoROICache.clear(), db.serperSearched.clear(),
+      db.insights.clear(), db.calendarEvents.clear(), db.gmailExtractions.clear(),
+      db.suppliers.clear(), db.quickActionLog.clear(),
     ])
   })
 }

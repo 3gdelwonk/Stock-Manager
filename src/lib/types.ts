@@ -169,6 +169,89 @@ export interface ImportLogEntry {
   anomalyCount: number
 }
 
+// ─── Insight (AI-generated intelligence) ─────────────────────────────────
+export type InsightType = 'waste' | 'competitor' | 'opportunity' | 'lifecycle' | 'forecast' | 'anomaly' | 'price' | 'trend'
+
+export interface Insight {
+  id?: number
+  type: InsightType
+  title: string
+  body: string
+  source: 'ai' | 'serper' | 'gmail' | 'system'
+  estimatedImpact?: number
+  status: 'unread' | 'read' | 'actioned' | 'dismissed'
+  actions: { label: string; variant: 'primary' | 'secondary'; handler: string }[]
+  relatedProducts?: string[]
+  createdAt: string
+  expiresAt?: string
+}
+
+// ─── Calendar Event ──────────────────────────────────────────────────────
+export type CalendarEventType = 'delivery-direct' | 'delivery-alm' | 'order-cutoff' | 'holiday' | 'forecast' | 'custom'
+
+export interface CalendarEvent {
+  id?: number
+  date: string
+  time?: string
+  endTime?: string
+  title: string
+  description?: string
+  type: CalendarEventType
+  supplier?: string
+  source: 'manual' | 'gmail' | 'system' | 'recurring'
+  recurrence?: { frequency: 'weekly' | 'fortnightly'; dayOfWeek: number }
+  metadata?: { lineCount?: number; dollarTotal?: number; unitCount?: number; forecastRevenue?: number }
+  createdAt: string
+}
+
+// ─── Gmail Extraction ────────────────────────────────────────────────────
+export interface GmailExtraction {
+  id?: number
+  gmailMessageId: string
+  from: string
+  subject: string
+  receivedAt: string
+  supplier: string
+  extractionType: 'delivery' | 'order-confirmation' | 'short-delivery' | 'short-date' | 'cutoff-reminder' | 'general'
+  extractedData: {
+    deliveryDate?: string
+    itemCount?: number
+    dollarTotal?: number
+    shortItems?: { productName: string; barcode?: string; orderedQty: number; deliveredQty: number; reason?: string }[]
+    shortDatedItems?: { productName: string; barcode?: string; expectedExpiry: string; actualExpiry: string; daysShort: number }[]
+    orderCutoff?: string
+    orderNumber?: string
+  }
+  status: 'auto-detected' | 'confirmed' | 'dismissed'
+  calendarEventId?: number
+  createdAt: string
+}
+
+// ─── Supplier ────────────────────────────────────────────────────────────
+export interface Supplier {
+  id?: number
+  name: string
+  type: 'direct' | 'alm' | 'metcash'
+  emailPatterns: string[]
+  deliveryDays: number[]
+  orderCutoff?: { dayOfWeek: number; time: string; leadTimeDays: number }
+  color: string
+  active: boolean
+  createdAt: string
+}
+
+// ─── Quick Action Log ────────────────────────────────────────────────────
+export interface QuickActionLogEntry {
+  id?: number
+  actionType: 'price-change' | 'stock-adjust' | 'expiry-batch' | 'waste-log' | 'label-print' | 'price-check'
+  barcode: string
+  productName: string
+  details: Record<string, unknown>
+  syncStatus: 'pending' | 'synced' | 'failed'
+  performedBy?: string
+  performedAt: string
+}
+
 // ─── Stock Performance ────────────��───────────────────────────────────────
 export interface StockPerformance {
   productId: number

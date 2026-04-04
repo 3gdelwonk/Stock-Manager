@@ -12,6 +12,7 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         crew: resolve(__dirname, 'crew/index.html'),
+        stockintel: resolve(__dirname, 'stockintel/index.html'),
       },
       output: {
         manualChunks: {
