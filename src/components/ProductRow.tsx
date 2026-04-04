@@ -4,7 +4,8 @@ import {
   BarChart3, PackageMinus, TrendingUp, TrendingDown, Clock,
 } from 'lucide-react'
 import type { Product, StockPerformance } from '../lib/types'
-import { adjustStock, printLabel } from '../lib/jarvis'
+import { printLabel } from '../lib/jarvis'
+import StockAdjustModal from './StockAdjustModal'
 import { db } from '../lib/db'
 import ProductImage from './ProductImage'
 import BarcodeStripe from './BarcodeStripe'
@@ -122,17 +123,7 @@ export function ProductRow({ ep, onPriceChange, onCompare, onAddExpiry }: Produc
     } finally { setSaving(false) }
   }
 
-  async function handleAdjustStock() {
-    const input = prompt('Adjust stock quantity (negative to reduce):')
-    if (!input) return
-    const qty = parseInt(input, 10)
-    if (isNaN(qty)) return
-    try {
-      await adjustStock(product.barcode || product.itemCode, qty, 'manual_adjustment')
-      setActionMsg('Stock adjusted')
-      setTimeout(() => setActionMsg(null), 2000)
-    } catch { setActionMsg('Failed') }
-  }
+  const [adjustOpen, setAdjustOpen] = useState(false)
 
   async function handlePrintLabel() {
     try {
@@ -349,7 +340,7 @@ export function ProductRow({ ep, onPriceChange, onCompare, onAddExpiry }: Produc
               className="flex flex-col items-center gap-0.5 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-[10px] font-medium hover:bg-emerald-100 transition-colors">
               <DollarSign size={16} /> Price
             </button>
-            <button onClick={handleAdjustStock}
+            <button onClick={() => setAdjustOpen(true)}
               className="flex flex-col items-center gap-0.5 py-2 rounded-lg bg-blue-50 text-blue-700 text-[10px] font-medium hover:bg-blue-100 transition-colors">
               <PackageMinus size={16} /> Adjust
             </button>
@@ -377,6 +368,18 @@ export function ProductRow({ ep, onPriceChange, onCompare, onAddExpiry }: Produc
             </button>
           </div>
         </div>
+      )}
+
+      {adjustOpen && (
+        <StockAdjustModal
+          target={{
+            barcode: product.barcode || product.itemCode,
+            description: product.name,
+            currentQoh: qoh ?? 0,
+          }}
+          onClose={() => setAdjustOpen(false)}
+          onSuccess={(msg) => { setAdjustOpen(false); setActionMsg(msg); setTimeout(() => setActionMsg(null), 2000) }}
+        />
       )}
     </div>
   )

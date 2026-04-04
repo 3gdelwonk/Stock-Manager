@@ -128,8 +128,8 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
     )
   }
 
-  const totalUsed = usage.images + usage.shopping + usage.other
-  const budgetSum = budget.images + budget.shopping + budget.other
+  const serpApiUsed = usage.shopping + usage.other
+  const budgetSum = budget.shopping + budget.other
   const budgetValid = budgetSum <= budget.monthlyLimit
 
   return (
@@ -181,58 +181,54 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
 
         <div className="space-y-2">
           <label className="text-sm font-medium text-gray-700">Search API Usage</label>
-          <p className="text-xs text-gray-400">Images &amp; shopping powered by JARVISmart server (Serper + SerpApi)</p>
+          <p className="text-xs text-gray-400">Images via Serper.dev (unlimited) — Shopping &amp; research via SerpApi (budget-gated)</p>
 
           {/* ── Budget & Usage ── */}
           <div className="bg-gray-50 rounded-lg p-3 space-y-3 mt-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-gray-700">
-                  {new Date().toLocaleString('en-AU', { month: 'long', year: 'numeric' })} — Serper Usage
+                  {new Date().toLocaleString('en-AU', { month: 'long', year: 'numeric' })} — API Usage
                 </span>
-                <span className="text-[10px] text-gray-400">{totalUsed} / {budget.monthlyLimit}</span>
+                <span className="text-[10px] text-gray-400">SerpApi: {serpApiUsed} / {budget.monthlyLimit}</span>
               </div>
 
               <div className="space-y-1.5">
                 <div>
                   <div className="flex justify-between text-[10px] text-gray-500">
-                    <span>Images</span><span>{usage.images} / {budget.images}</span>
+                    <span>Images (Serper.dev)</span><span>{usage.images} — unlimited</span>
                   </div>
-                  <UsageBar used={usage.images} total={budget.images} color="bg-blue-500" />
+                  <div className="w-full h-1.5 bg-blue-100 rounded-full">
+                    <div className="h-full bg-blue-500 rounded-full" style={{ width: usage.images > 0 ? '100%' : '0%', opacity: 0.4 }} />
+                  </div>
                 </div>
                 <div>
                   <div className="flex justify-between text-[10px] text-gray-500">
-                    <span>Shopping</span><span>{usage.shopping} / {budget.shopping}</span>
+                    <span>Shopping (SerpApi)</span><span>{usage.shopping} / {budget.shopping}</span>
                   </div>
                   <UsageBar used={usage.shopping} total={budget.shopping} color="bg-purple-500" />
                 </div>
                 <div>
                   <div className="flex justify-between text-[10px] text-gray-500">
-                    <span>Other</span><span>{usage.other} / {budget.other}</span>
+                    <span>Research (SerpApi)</span><span>{usage.other} / {budget.other}</span>
                   </div>
                   <UsageBar used={usage.other} total={budget.other} color="bg-gray-400" />
                 </div>
                 <div className="pt-1 border-t border-gray-200">
                   <div className="flex justify-between text-[10px] font-medium text-gray-600">
-                    <span>Total</span><span>{totalUsed} / {budget.monthlyLimit}</span>
+                    <span>SerpApi Total</span><span>{serpApiUsed} / {budget.monthlyLimit}</span>
                   </div>
-                  <UsageBar used={totalUsed} total={budget.monthlyLimit} color="bg-emerald-500" />
+                  <UsageBar used={serpApiUsed} total={budget.monthlyLimit} color="bg-emerald-500" />
                 </div>
               </div>
 
-              {/* Budget allocation */}
+              {/* Budget allocation — SerpApi only */}
               <div className="space-y-1.5 pt-2 border-t border-gray-200">
-                <span className="text-[10px] font-semibold text-gray-600">Budget Allocation</span>
-                <div className="grid grid-cols-4 gap-1.5">
+                <span className="text-[10px] font-semibold text-gray-600">SerpApi Budget Allocation</span>
+                <div className="grid grid-cols-3 gap-1.5">
                   <div>
                     <label className="text-[9px] text-gray-400">Plan Limit</label>
                     <input type="number" min={100} value={budget.monthlyLimit}
-                      onChange={e => saveBudget({ monthlyLimit: Number(e.target.value) || 5000 })}
-                      className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center" />
-                  </div>
-                  <div>
-                    <label className="text-[9px] text-gray-400">Images</label>
-                    <input type="number" min={0} value={budget.images}
-                      onChange={e => saveBudget({ images: Number(e.target.value) || 0 })}
+                      onChange={e => saveBudget({ monthlyLimit: Number(e.target.value) || 4000 })}
                       className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center" />
                   </div>
                   <div>
@@ -242,7 +238,7 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
                       className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center" />
                   </div>
                   <div>
-                    <label className="text-[9px] text-gray-400">Other</label>
+                    <label className="text-[9px] text-gray-400">Research</label>
                     <input type="number" min={0} value={budget.other}
                       onChange={e => saveBudget({ other: Number(e.target.value) || 0 })}
                       className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center" />

@@ -26,6 +26,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'prompt',
+      workbox: {
+        navigateFallbackDenylist: [/^\/crew/, /^\/stockintel/],
+      },
       manifest: {
         name: 'Grocery Manager',
         short_name: 'Grocery',

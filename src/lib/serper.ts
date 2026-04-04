@@ -1,9 +1,9 @@
 // ═══════════════════════════════════════════════
 // Server-Side Search API — via JARVISmart proxy
-// Images: /api/pos/serper-images (Serper.dev)
-// Shopping: /api/pos/serpapi/shopping (SerpApi)
-// Research: /api/pos/serpapi/research (SerpApi)
-// Budget tracking for client-side awareness only
+// Images: /api/pos/serper-images (Serper.dev) — unlimited, no budget cap
+// Shopping: /api/pos/serpapi/shopping (SerpApi) — budget-gated
+// Research: /api/pos/serpapi/research (SerpApi) — budget-gated
+// Budget tracking applies to SerpApi only
 // ═══════════════════════════════════════════════
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -18,8 +18,7 @@ export interface SerperUsage {
 }
 
 export interface SerperBudget {
-  monthlyLimit: number
-  images: number
+  monthlyLimit: number   // applies to SerpApi (shopping + other) only
   shopping: number
   other: number
 }
@@ -69,7 +68,7 @@ export function isPlaceholderUrl(url: string): boolean {
 
 // ── Budget Management (client-side tracking) ──────────────────────────────
 
-const DEFAULT_BUDGET: SerperBudget = { monthlyLimit: 5000, images: 1000, shopping: 3500, other: 500 }
+const DEFAULT_BUDGET: SerperBudget = { monthlyLimit: 4000, shopping: 3500, other: 500 }
 
 function getCurrentMonth(): string {
   const d = new Date()
@@ -107,14 +106,17 @@ export function trackSerperQuery(type: SerperQueryType): void {
   localStorage.setItem('grocery-manager-serper-usage', JSON.stringify(usage))
 }
 
+/** Images (Serper.dev) are unlimited. SerpApi (shopping + other) is budget-gated. */
 export function canUseSerper(type: SerperQueryType): boolean {
+  if (type === 'images') return true
   const usage = getSerperUsage()
   const budget = getSerperBudget()
-  const totalUsed = usage.images + usage.shopping + usage.other
-  return usage[type] < budget[type] && totalUsed < budget.monthlyLimit
+  const serpApiUsed = usage.shopping + usage.other
+  return usage[type] < budget[type] && serpApiUsed < budget.monthlyLimit
 }
 
 export function getSerperRemaining(type: SerperQueryType): number {
+  if (type === 'images') return Infinity
   const usage = getSerperUsage()
   const budget = getSerperBudget()
   return Math.max(0, budget[type] - usage[type])
@@ -123,8 +125,8 @@ export function getSerperRemaining(type: SerperQueryType): number {
 export function getSerperTotalRemaining(): number {
   const usage = getSerperUsage()
   const budget = getSerperBudget()
-  const totalUsed = usage.images + usage.shopping + usage.other
-  return Math.max(0, budget.monthlyLimit - totalUsed)
+  const serpApiUsed = usage.shopping + usage.other
+  return Math.max(0, budget.monthlyLimit - serpApiUsed)
 }
 
 export function resetSerperUsage(): void {

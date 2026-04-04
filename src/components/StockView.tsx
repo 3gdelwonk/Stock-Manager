@@ -6,7 +6,7 @@ import {
 } from 'lucide-react'
 import {
   checkConnection, getStockLevels, getPromotions, getTopSellers,
-  adjustStock, printLabel, getOrderInfo,
+  printLabel, getOrderInfo,
   type StockItem, type LivePromotion, type TopSeller, type OrderInfo,
 } from '../lib/jarvis'
 import { resolveBarcode, getAliasesForItem, setPrimaryBarcode } from '../lib/barcodeResolver'
@@ -20,6 +20,7 @@ import ProductImage from './ProductImage'
 import PriceChangeModal from './PriceChangeModal'
 import CompetitivePriceSheet from './CompetitivePriceSheet'
 import AddBatchSheet from './AddBatchSheet'
+import StockAdjustModal from './StockAdjustModal'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -70,11 +71,13 @@ function StockCard({
   onPriceChange,
   onCompare,
   onAddExpiry,
+  onAdjustStock,
 }: {
   item: EnrichedStockItem
   onPriceChange: (item: StockItem) => void
   onCompare: (item: StockItem) => void
   onAddExpiry: (item: StockItem) => void
+  onAdjustStock: (item: StockItem) => void
 }) {
   const { stock, promo, topSeller, slowMover, margin, expiryInfo } = item
   const [expanded, setExpanded] = useState(false)
@@ -116,18 +119,6 @@ function StockCard({
   }
 
   const primarySupplier = orderInfo?.suppliers?.find(s => s.isPrimary) ?? orderInfo?.suppliers?.[0] ?? null
-
-  async function handleAdjustStock() {
-    const input = prompt('Adjust stock quantity (negative to reduce):')
-    if (!input) return
-    const qty = parseInt(input, 10)
-    if (isNaN(qty)) return
-    try {
-      await adjustStock(stock.barcode || stock.itemCode, qty, 'manual_adjustment')
-      setActionMsg('Stock adjusted')
-      setTimeout(() => setActionMsg(null), 2000)
-    } catch { setActionMsg('Failed') }
-  }
 
   async function handlePrintLabel() {
     try {
@@ -432,7 +423,7 @@ function StockCard({
               className="flex flex-col items-center gap-0.5 py-2 rounded-lg bg-emerald-50 text-emerald-700 text-[10px] font-medium hover:bg-emerald-100 transition-colors">
               <DollarSign size={16} /> Price
             </button>
-            <button onClick={handleAdjustStock}
+            <button onClick={() => onAdjustStock(stock)}
               className="flex flex-col items-center gap-0.5 py-2 rounded-lg bg-blue-50 text-blue-700 text-[10px] font-medium hover:bg-blue-100 transition-colors">
               <PackageMinus size={16} /> Adjust
             </button>
@@ -493,6 +484,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
   const [priceTarget, setPriceTarget] = useState<StockItem | null>(null)
   const [compareTarget, setCompareTarget] = useState<StockItem | null>(null)
   const [expiryTarget, setExpiryTarget] = useState<StockItem | null>(null)
+  const [adjustTarget, setAdjustTarget] = useState<StockItem | null>(null)
 
   // ── Hooks for enrichment ──
   const expiryMap = useProductExpiry()
@@ -941,6 +933,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
               onPriceChange={setPriceTarget}
               onCompare={setCompareTarget}
               onAddExpiry={setExpiryTarget}
+              onAdjustStock={setAdjustTarget}
             />
           ))
         )}
@@ -989,6 +982,18 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
         initialProductName={expiryTarget?.description}
         initialDepartment={expiryTarget?.department}
       />
+
+      {adjustTarget && (
+        <StockAdjustModal
+          target={{
+            barcode: adjustTarget.barcode || adjustTarget.itemCode,
+            description: adjustTarget.description,
+            currentQoh: adjustTarget.onHand,
+          }}
+          onClose={() => setAdjustTarget(null)}
+          onSuccess={() => { setAdjustTarget(null); fetchData(true) }}
+        />
+      )}
     </div>
   )
 }
