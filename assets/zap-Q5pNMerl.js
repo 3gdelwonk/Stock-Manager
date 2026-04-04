@@ -1,4 +1,4 @@
-import{c as a}from"./BarcodeScanner-D-GtuIrp.js";/**
+import{c as a}from"./BarcodeScanner-CBIQ-sEK.js";/**
  * @license lucide-react v0.479.0 - ISC
  *
  * This source code is licensed under the ISC license.
