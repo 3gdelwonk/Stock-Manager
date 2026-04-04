@@ -2,12 +2,17 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { resolve } from 'path'
 
 export default defineConfig({
   base: './',
   build: {
     target: ['es2020', 'safari15'],
     rollupOptions: {
+      input: {
+        main: resolve(__dirname, 'index.html'),
+        crew: resolve(__dirname, 'crew/index.html'),
+      },
       output: {
         manualChunks: {
           xlsx: ['xlsx'],
