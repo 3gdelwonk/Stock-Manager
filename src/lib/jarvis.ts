@@ -7,6 +7,12 @@
 const DEFAULT_URL = 'https://api.jarvismart196410.uk'
 const DEFAULT_KEY = 'jmart_sk_7f3a9c2e1b4d8f6a0e5c3b9d'
 
+/** Liquor department names excluded from the entire app */
+const EXCLUDED_DEPTS = new Set(['LIQUEURS', 'WINE', 'SPIRITS', 'LIQUOR/MISC', 'BEER'])
+function isLiquor(dept: string): boolean {
+  return EXCLUDED_DEPTS.has(dept.toUpperCase().trim())
+}
+
 function getBaseUrl(): string {
   return localStorage.getItem('grocery-manager-jarvis-url') || (import.meta.env.VITE_JARVIS_URL as string) || DEFAULT_URL
 }
@@ -322,32 +328,36 @@ export async function getDepartmentBreakdown(period: 'today' | 'week' | 'month' 
   const raw = await jarvisFetch<{ period: string; departments: RawDepartment[] }>(
     `/api/pos/departments?period=${encodeURIComponent(period)}`
   )
-  return raw.departments.map(d => ({
-    code:            d.code,
-    department:      d.name,
-    sales:           d.totalSales,
-    cost:            d.totalCost,
-    grossProfit:     d.grossProfit,
-    marginPercent:   d.marginPercent,
-    transactions:    d.transactions,
-    normalSales:     d.normalSales,
-    promotionSales:  d.promotionSales,
-  }))
+  return raw.departments
+    .filter(d => !isLiquor(d.name))
+    .map(d => ({
+      code:            d.code,
+      department:      d.name,
+      sales:           d.totalSales,
+      cost:            d.totalCost,
+      grossProfit:     d.grossProfit,
+      marginPercent:   d.marginPercent,
+      transactions:    d.transactions,
+      normalSales:     d.normalSales,
+      promotionSales:  d.promotionSales,
+    }))
 }
 
 export async function getTopSellers(days = 7, limit = 20): Promise<TopSeller[]> {
   const raw = await jarvisFetch<{ period: string; items: RawTopSeller[] }>(
     `/api/pos/top-sellers?days=${days}&limit=${limit}`
   )
-  return raw.items.map(t => ({
-    rank:          t.rank,
-    itemCode:      t.itemCode,
-    description:   t.description,
-    department:    t.department,
-    quantitySold:  t.qtySold,
-    revenue:       t.revenue,
-    cost:          t.cost,
-  }))
+  return raw.items
+    .filter(t => !isLiquor(t.department))
+    .map(t => ({
+      rank:          t.rank,
+      itemCode:      t.itemCode,
+      description:   t.description,
+      department:    t.department,
+      quantitySold:  t.qtySold,
+      revenue:       t.revenue,
+      cost:          t.cost,
+    }))
 }
 
 export async function getStockLevels(filters: StockFilters = {}): Promise<StockItem[]> {
@@ -360,21 +370,23 @@ export async function getStockLevels(filters: StockFilters = {}): Promise<StockI
   const raw = await jarvisFetch<{ items: RawStockItem[]; count: number }>(
     `/api/pos/stock${qs ? '?' + qs : ''}`
   )
-  return raw.items.map(s => ({
-    itemCode:       s.ItemCode,
-    barcode:        s.barcode ?? null,
-    description:    s.ItemDescription.trim(),
-    department:     s.DepartmentName,
-    departmentCode: s.DepartmentCode,
-    onHand:         s.QOH,
-    reorderLevel:   s.MinOH,
-    sellPrice:      s.RegSellPrice,
-    avgCost:        s.AvgCost,
-    onOrder:        s.OnOrder,
-    isOnReorder:    s.IsOnReorder,
-    avgDayQty:      s.AvgDayQty,
-    avgWeekQty:     s.AvgWeekQty,
-  }))
+  return raw.items
+    .filter(s => !isLiquor(s.DepartmentName))
+    .map(s => ({
+      itemCode:       s.ItemCode,
+      barcode:        s.barcode ?? null,
+      description:    s.ItemDescription.trim(),
+      department:     s.DepartmentName,
+      departmentCode: s.DepartmentCode,
+      onHand:         s.QOH,
+      reorderLevel:   s.MinOH,
+      sellPrice:      s.RegSellPrice,
+      avgCost:        s.AvgCost,
+      onOrder:        s.OnOrder,
+      isOnReorder:    s.IsOnReorder,
+      avgDayQty:      s.AvgDayQty,
+      avgWeekQty:     s.AvgWeekQty,
+    }))
 }
 
 export async function searchItems(query: string, limit = 20): Promise<SearchResult> {
@@ -493,7 +505,6 @@ export async function putPrice(
 const ALL_DEPT_NAMES = [
   'GROCERY', 'DAIRY', 'FROZEN', 'FRESH PRODUCE', 'MEAT', 'DELI', 'BAKERY',
   'HEALTH & BEAUTY', 'HOUSEHOLD', 'PET', 'BABY', 'GENERAL MERCHANDISE', 'TOBACCO',
-  'LIQUEURS', 'WINE', 'SPIRITS', 'LIQUOR/MISC', 'BEER',
 ]
 
 export async function getPromotions(): Promise<{ items: LivePromotion[]; count: number; expiringSoonCount: number }> {

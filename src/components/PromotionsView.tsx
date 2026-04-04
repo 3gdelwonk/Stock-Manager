@@ -24,11 +24,6 @@ const DEPT_BADGE_COLORS: Record<string, string> = {
   BABY:                 'bg-rose-100 text-rose-700',
   TOBACCO:              'bg-stone-100 text-stone-700',
   'GENERAL MERCHANDISE':'bg-slate-100 text-slate-700',
-  LIQUEURS:             'bg-purple-100 text-purple-700',
-  WINE:                 'bg-fuchsia-100 text-fuchsia-700',
-  SPIRITS:              'bg-cyan-100 text-cyan-700',
-  BEER:                 'bg-yellow-100 text-yellow-700',
-  'LIQUOR/MISC':        'bg-lime-100 text-lime-700',
 }
 
 function deptBadgeClass(dept: string): string {

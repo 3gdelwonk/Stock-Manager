@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   ShoppingCart, Milk, Snowflake, Apple, Beef, UtensilsCrossed, CakeSlice,
-  Heart, Home, PawPrint, Baby, Cigarette, Store, Wine, GlassWater, Beer,
+  Heart, Home, PawPrint, Baby, Cigarette, Store,
   RefreshCw, Search, X, Check,
 } from 'lucide-react'
 import {
@@ -36,11 +36,6 @@ const DEPT_ICONS: Record<string, typeof ShoppingCart> = {
   BABY: Baby,
   TOBACCO: Cigarette,
   'GENERAL MERCHANDISE': Store,
-  LIQUEURS: Wine,
-  WINE: Wine,
-  SPIRITS: GlassWater,
-  BEER: Beer,
-  'LIQUOR/MISC': GlassWater,
 }
 
 const DEPT_BG: Record<string, string> = {

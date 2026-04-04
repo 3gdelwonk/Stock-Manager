@@ -2,7 +2,7 @@
 export type GroceryDepartment =
   | 'grocery' | 'dairy' | 'frozen' | 'fresh_produce' | 'meat'
   | 'deli' | 'bakery' | 'health_beauty' | 'household' | 'pet'
-  | 'baby' | 'liquor' | 'tobacco' | 'general_merch' | 'other'
+  | 'baby' | 'tobacco' | 'general_merch' | 'other'
 
 // ─── Product ───────────────────────────────────���──────────────────────────
 export interface Product {

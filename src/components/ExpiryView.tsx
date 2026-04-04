@@ -104,7 +104,10 @@ export default function ExpiryView() {
   const [scannerOpen, setScannerOpen] = useState(false)
 
   // ─── Reactive queries ────────────────────────────────────────────────────
-  const allBatches = useLiveQuery(() => db.expiryBatches.toArray(), [])
+  const allBatches = useLiveQuery(
+    () => db.expiryBatches.filter(b => b.department !== 'liquor').toArray(),
+    [],
+  )
   const wasteLog = useLiveQuery(() => db.wasteLog.orderBy('loggedAt').reverse().toArray(), [])
 
   // ─── Filtered batches for Upcoming tab ───────────────────────────────────

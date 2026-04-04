@@ -17,11 +17,6 @@ export const DEPT_CODE_MAP: Record<number, GroceryDepartment> = {
   11: 'baby',
   12: 'general_merch',
   15: 'tobacco',
-  20: 'liquor',
-  21: 'liquor',
-  22: 'liquor',
-  23: 'liquor',
-  25: 'liquor',
 }
 
 export const DEPT_NAME_MAP: Record<string, GroceryDepartment> = {
@@ -41,11 +36,6 @@ export const DEPT_NAME_MAP: Record<string, GroceryDepartment> = {
   'BABY':                'baby',
   'GENERAL MERCHANDISE': 'general_merch',
   'TOBACCO':             'tobacco',
-  'LIQUEURS':            'liquor',
-  'WINE':                'liquor',
-  'SPIRITS':             'liquor',
-  'LIQUOR/MISC':         'liquor',
-  'BEER':                'liquor',
 }
 
 export const DEPARTMENT_LABELS: Record<GroceryDepartment, string> = {
@@ -60,7 +50,6 @@ export const DEPARTMENT_LABELS: Record<GroceryDepartment, string> = {
   household:     'Household',
   pet:           'Pet',
   baby:          'Baby',
-  liquor:        'Liquor',
   tobacco:       'Tobacco',
   general_merch: 'General Merch',
   other:         'Other',
@@ -78,7 +67,6 @@ export const DEPARTMENT_COLORS: Record<GroceryDepartment, string> = {
   household:     '#8b5cf6',
   pet:           '#14b8a6',
   baby:          '#f472b6',
-  liquor:        '#7c3aed',
   tobacco:       '#6b7280',
   general_merch: '#64748b',
   other:         '#9ca3af',
@@ -86,7 +74,7 @@ export const DEPARTMENT_COLORS: Record<GroceryDepartment, string> = {
 
 export const DEPARTMENT_ORDER: GroceryDepartment[] = [
   'grocery', 'dairy', 'frozen', 'fresh_produce', 'meat', 'deli', 'bakery',
-  'health_beauty', 'household', 'pet', 'baby', 'liquor', 'tobacco', 'general_merch', 'other',
+  'health_beauty', 'household', 'pet', 'baby', 'tobacco', 'general_merch', 'other',
 ]
 
 // ─── Expiry Thresholds ──────��─────────────────────────────────────────────

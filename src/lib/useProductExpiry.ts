@@ -12,7 +12,7 @@ export interface ExpiryInfo {
 
 export function useProductExpiry(): Map<string, ExpiryInfo> {
   const activeBatches = useLiveQuery(
-    () => db.expiryBatches.where('status').equals('active').toArray(),
+    () => db.expiryBatches.where('status').equals('active').filter(b => b.department !== 'liquor').toArray(),
     [],
   )
 
