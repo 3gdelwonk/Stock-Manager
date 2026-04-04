@@ -16,6 +16,14 @@ export interface SerperSearchedEntry {
   itemCode: string
 }
 
+export interface BarcodeAlias {
+  barcode: string
+  itemCode: string
+  primaryBarcode: string
+  description: string
+  createdAt: Date
+}
+
 class GroceryManagerDB extends Dexie {
   products!: EntityTable<Product, 'id'>
   stockSnapshots!: EntityTable<StockSnapshot, 'id'>
@@ -34,6 +42,7 @@ class GroceryManagerDB extends Dexie {
   gmailExtractions!: EntityTable<GmailExtraction, 'id'>
   suppliers!: EntityTable<Supplier, 'id'>
   quickActionLog!: EntityTable<QuickActionLogEntry, 'id'>
+  barcodeAliases!: EntityTable<BarcodeAlias, 'barcode'>
 
   constructor() {
     super('GroceryManagerDB')
@@ -62,6 +71,9 @@ class GroceryManagerDB extends Dexie {
       suppliers:         '++id, name, type',
       quickActionLog:    '++id, actionType, barcode, performedAt, syncStatus',
     })
+    this.version(5).stores({
+      barcodeAliases:    'barcode, itemCode, primaryBarcode',
+    })
   }
 }
 
@@ -73,6 +85,7 @@ export async function clearAllData(): Promise<void> {
     db.expiryBatches, db.wasteLog, db.trackedItems, db.trackedPromos,
     db.importLog, db.imageCache, db.promoROICache, db.serperSearched,
     db.insights, db.calendarEvents, db.gmailExtractions, db.suppliers, db.quickActionLog,
+    db.barcodeAliases,
   ], async () => {
     await Promise.all([
       db.products.clear(), db.stockSnapshots.clear(), db.salesRecords.clear(),
@@ -80,7 +93,7 @@ export async function clearAllData(): Promise<void> {
       db.trackedItems.clear(), db.trackedPromos.clear(), db.importLog.clear(),
       db.imageCache.clear(), db.promoROICache.clear(), db.serperSearched.clear(),
       db.insights.clear(), db.calendarEvents.clear(), db.gmailExtractions.clear(),
-      db.suppliers.clear(), db.quickActionLog.clear(),
+      db.suppliers.clear(), db.quickActionLog.clear(), db.barcodeAliases.clear(),
     ])
   })
 }

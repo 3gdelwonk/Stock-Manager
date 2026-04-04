@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { ScanBarcode, Printer, Check, AlertCircle, Plus, Minus } from 'lucide-react'
 import { searchItems, printLabel } from '../../lib/jarvis'
+import { resolveBarcode } from '../../lib/barcodeResolver'
 import BarcodeScanner from '../BarcodeScanner'
 import ProductImage from '../ProductImage'
 
@@ -27,16 +28,28 @@ export default function CrewPrint() {
     setResult(null)
     setProduct(null)
     try {
-      const res = await searchItems(trimmed, 1)
-      if (res.items?.length > 0) {
-        const item = res.items[0]
+      // Try alias resolver first (resolves alternate barcodes)
+      const resolved = await resolveBarcode(trimmed)
+      if (resolved) {
         setProduct({
-          itemCode: item.itemCode,
-          barcode: item.barcode || trimmed,
-          description: item.description,
-          department: item.department,
-          sellPrice: item.sellPrice,
+          itemCode: resolved.itemCode,
+          barcode: resolved.primaryBarcode || trimmed,
+          description: resolved.description,
+          department: '',
+          sellPrice: 0,
         })
+        // Enrich with full data from search
+        const res = await searchItems(resolved.primaryBarcode || resolved.itemCode, 1)
+        if (res.items?.length > 0) {
+          const item = res.items[0]
+          setProduct({
+            itemCode: item.itemCode,
+            barcode: resolved.primaryBarcode || item.barcode || trimmed,
+            description: item.description,
+            department: item.department,
+            sellPrice: item.sellPrice,
+          })
+        }
         setQty(1)
       } else {
         setResult({ kind: 'error', msg: 'Product not found' })

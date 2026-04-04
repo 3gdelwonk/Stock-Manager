@@ -3,6 +3,7 @@ import { ScanBarcode, Search, Plus, X } from 'lucide-react'
 import { db } from '../lib/db'
 import { addExpiryBatch } from '../lib/expiry'
 import { searchItems } from '../lib/jarvis'
+import { resolveBarcode } from '../lib/barcodeResolver'
 import BarcodeScanner from './BarcodeScanner'
 import { DEPARTMENT_ORDER, DEPARTMENT_LABELS } from '../lib/constants'
 
@@ -67,13 +68,23 @@ export default function AddBatchSheet({ open, onClose, initialBarcode, initialPr
       return
     }
 
-    // 2. Fallback: search JARVISmart API
+    // 2. Try barcode alias resolver (checks alias DB + API search)
+    try {
+      const resolved = await resolveBarcode(trimmed)
+      if (resolved) {
+        setProductName(resolved.description)
+        setBarcodeInput(resolved.primaryBarcode || trimmed)
+        setLookupDone(true)
+        return
+      }
+    } catch { /* resolver unavailable */ }
+
+    // 3. Direct API search fallback
     try {
       const result = await searchItems(trimmed, 1)
       if (result.items && result.items.length > 0) {
         const item = result.items[0]
         setProductName(item.description)
-        // JARVISmart returns department name directly
         setDepartment(item.department)
         setBarcodeInput(item.barcode || trimmed)
         setLookupDone(true)

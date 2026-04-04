@@ -3,6 +3,7 @@ import { ScanBarcode, Search, Plus, Check, X, Clock } from 'lucide-react'
 import { db } from '../../lib/db'
 import { addExpiryBatch } from '../../lib/expiry'
 import { searchItems } from '../../lib/jarvis'
+import { resolveBarcode } from '../../lib/barcodeResolver'
 import BarcodeScanner from '../BarcodeScanner'
 import { DEPARTMENT_ORDER, DEPARTMENT_LABELS } from '../../lib/constants'
 
@@ -45,7 +46,18 @@ export default function CrewExpiry() {
       return
     }
 
-    // 2. Fallback: JARVISmart API
+    // 2. Try barcode alias resolver
+    try {
+      const resolved = await resolveBarcode(trimmed)
+      if (resolved) {
+        setProductName(resolved.description)
+        setBarcodeInput(resolved.primaryBarcode || trimmed)
+        setLookupDone(true)
+        return
+      }
+    } catch { /* resolver unavailable */ }
+
+    // 3. Direct API search fallback
     try {
       const result = await searchItems(trimmed, 1)
       if (result.items?.length > 0) {

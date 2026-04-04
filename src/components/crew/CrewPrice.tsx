@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { ScanBarcode, Check, AlertCircle, Send, Tag } from 'lucide-react'
 import { searchItems, changeAndSend, updateBackOfficePrice, printLabel } from '../../lib/jarvis'
+import { resolveBarcode } from '../../lib/barcodeResolver'
 import { db } from '../../lib/db'
 import { PRICE_CHANGE_REASONS } from '../../lib/constants'
 import type { TrackedItem } from '../../lib/types'
@@ -36,15 +37,18 @@ export default function CrewPrice() {
     setNewPrice('')
     setNotes('')
     try {
-      const res = await searchItems(trimmed, 1)
-      if (res.items?.length > 0) {
-        const item = res.items[0]
+      // Try alias resolver first (handles alternate barcodes)
+      const resolved = await resolveBarcode(trimmed)
+      if (resolved) {
+        // Enrich with full search data
+        const res = await searchItems(resolved.primaryBarcode || resolved.itemCode, 1)
+        const item = res.items?.[0]
         setProduct({
-          itemCode: item.itemCode,
-          barcode: item.barcode || trimmed,
-          description: item.description,
-          department: item.department,
-          sellPrice: item.sellPrice,
+          itemCode: resolved.itemCode,
+          barcode: resolved.primaryBarcode || trimmed,
+          description: item?.description || resolved.description,
+          department: item?.department || '',
+          sellPrice: item?.sellPrice || 0,
         })
       } else {
         setResult({ kind: 'error', msg: 'Product not found' })

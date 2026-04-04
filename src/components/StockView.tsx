@@ -9,6 +9,8 @@ import {
   adjustStock, printLabel, getOrderInfo,
   type StockItem, type LivePromotion, type TopSeller, type OrderInfo,
 } from '../lib/jarvis'
+import { resolveBarcode, getAliasesForItem, setPrimaryBarcode } from '../lib/barcodeResolver'
+import type { BarcodeAlias } from '../lib/db'
 import { useProductExpiry, type ExpiryInfo } from '../lib/useProductExpiry'
 import { prefetchImages, type PrefetchProgress } from '../lib/images'
 import { computeImagePriority } from '../lib/serper'
@@ -80,6 +82,8 @@ function StockCard({
   const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null)
   const [orderLoading, setOrderLoading] = useState(false)
   const orderFetched = useRef(false)
+  const [aliases, setAliases] = useState<BarcodeAlias[]>([])
+  const aliasesFetched = useRef(false)
 
   const lowStock = stock.onHand > 0 && stock.onHand <= stock.reorderLevel
   const outOfStock = stock.onHand <= 0
@@ -97,6 +101,18 @@ function StockCard({
         setOrderLoading(false)
       })
     }
+    if (next && !aliasesFetched.current) {
+      aliasesFetched.current = true
+      getAliasesForItem(stock.itemCode).then(setAliases)
+    }
+  }
+
+  async function handleSetPrimary(newPrimary: string) {
+    await setPrimaryBarcode(stock.itemCode, newPrimary)
+    const updated = await getAliasesForItem(stock.itemCode)
+    setAliases(updated)
+    setActionMsg(`Primary barcode set to ${newPrimary}`)
+    setTimeout(() => setActionMsg(null), 2000)
   }
 
   const primarySupplier = orderInfo?.suppliers?.find(s => s.isPrimary) ?? orderInfo?.suppliers?.[0] ?? null
@@ -250,6 +266,29 @@ function StockCard({
             {stock.barcode && (
               <div className="flex justify-center">
                 <BarcodeStripe value={stock.barcode} height={40} showText />
+              </div>
+            )}
+            {/* Barcode aliases */}
+            {aliases.length > 0 && (
+              <div className="pt-1 border-t border-gray-200 space-y-1">
+                <p className="text-[10px] text-gray-400 uppercase font-semibold">Alternate Barcodes</p>
+                {aliases.map(a => (
+                  <div key={a.barcode} className="flex items-center justify-between text-xs">
+                    <span className="font-mono text-gray-600">{a.barcode}</span>
+                    <div className="flex items-center gap-1.5">
+                      {a.primaryBarcode === a.barcode ? (
+                        <span className="text-[8px] px-1 py-0.5 bg-emerald-100 text-emerald-700 rounded font-semibold">PRIMARY</span>
+                      ) : (
+                        <button
+                          onClick={() => handleSetPrimary(a.barcode)}
+                          className="text-[9px] px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded hover:bg-emerald-100 hover:text-emerald-700 transition-colors"
+                        >
+                          Set Primary
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {/* Supplier info */}
@@ -590,18 +629,30 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
   }, [stockItems])
 
   // ── Barcode scan ──
-  const handleBarcodeScan = useCallback((code: string) => {
+  const handleBarcodeScan = useCallback(async (code: string) => {
     setScannerOpen(false)
     const trimmed = code.trim()
     const normalized = trimmed.replace(/[^0-9]/g, '')
-    // Match against live stock data from JARVISmart
+    // Try direct match against live stock data
     const match = stockLookup.byBarcode.get(trimmed)
       || stockLookup.byBarcode.get(normalized)
       || stockLookup.byItemCode.get(trimmed.toLowerCase())
       || stockLookup.byItemCode.get(normalized.toLowerCase())
-    setSearch(match ? (match.barcode || match.itemCode) : (normalized || trimmed))
+
+    if (match) {
+      setSearch(match.barcode || match.itemCode)
+    } else {
+      // Barcode not in stock list — try alias resolver (checks DB + API search)
+      const resolved = await resolveBarcode(normalized, stockItems)
+      if (resolved) {
+        // Search by primary barcode or item code so the stock list filters to it
+        setSearch(resolved.primaryBarcode || resolved.itemCode)
+      } else {
+        setSearch(normalized || trimmed)
+      }
+    }
     setDeptFilter('All')
-  }, [stockLookup])
+  }, [stockLookup, stockItems])
 
   // ── Enrich stock items ──
   const enrichedItems = useMemo((): EnrichedStockItem[] => {
