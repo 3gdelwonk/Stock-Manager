@@ -313,8 +313,6 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   const selectedPrinterName = printers.find(p => p.id === selectedPrinter)?.name || ''
   const selectedStyleName = labelStyles.find(s => s.id === selectedStyle)?.name || ''
   const filteredStyles = selectedPrinter != null ? labelStyles.filter(s => s.printerId === selectedPrinter) : labelStyles
-  const accentColor = isLabels ? 'emerald' : 'amber'
-
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
