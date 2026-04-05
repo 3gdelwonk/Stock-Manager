@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, X, ScanBarcode, DollarSign, Printer, Megaphone, Clock, PackagePlus } from 'lucide-react'
+import { Plus, X, ScanBarcode, DollarSign, Printer, Tag, Clock, PackagePlus } from 'lucide-react'
 
 interface FABMenuProps {
   onSmartScan: () => void
@@ -7,12 +7,12 @@ interface FABMenuProps {
   onChangePrice: () => void
   onAddExpiry: () => void
   onBulkPrint: () => void
-  onPrintTalkers: () => void
+  onPromotions: () => void
 }
 
 const MENU_ITEMS = [
   { key: 'addExpiry',      label: 'Add Expiry',      icon: Clock,        color: 'text-purple-600', bg: 'bg-purple-50' },
-  { key: 'printTalkers',   label: 'Print Talkers',   icon: Megaphone,    color: 'text-amber-600',  bg: 'bg-amber-50' },
+  { key: 'promotions',     label: 'Promotions',      icon: Tag,          color: 'text-amber-600',  bg: 'bg-amber-50' },
   { key: 'bulkPrint',      label: 'Bulk Print',      icon: Printer,      color: 'text-rose-600',   bg: 'bg-rose-50' },
   { key: 'changePrice',    label: 'Price Change',    icon: DollarSign,   color: 'text-amber-600',  bg: 'bg-amber-50' },
   { key: 'createProduct',  label: 'New Product',     icon: PackagePlus,  color: 'text-blue-600',   bg: 'bg-blue-50' },
@@ -25,7 +25,7 @@ export default function FABMenu({
   onChangePrice,
   onAddExpiry,
   onBulkPrint,
-  onPrintTalkers,
+  onPromotions,
 }: FABMenuProps) {
   const [open, setOpen] = useState(false)
 
@@ -45,7 +45,7 @@ export default function FABMenu({
     changePrice: onChangePrice,
     addExpiry: onAddExpiry,
     bulkPrint: onBulkPrint,
-    printTalkers: onPrintTalkers,
+    promotions: onPromotions,
   }
 
   function handleAction(key: string) {

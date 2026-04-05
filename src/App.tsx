@@ -1,7 +1,7 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, useEffect, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { LayoutDashboard, Warehouse, Clock, BarChart2, Lightbulb, Settings } from 'lucide-react'
+import { LayoutDashboard, Warehouse, Clock, BarChart2, Lightbulb, Settings, X } from 'lucide-react'
 import { useConnectionMonitor } from './lib/useConnectionMonitor'
 import ConnectionStatusBadge from './components/ConnectionStatusBadge'
 import ConnectionHistorySheet from './components/ConnectionHistorySheet'
@@ -17,7 +17,7 @@ import CreateProductSheet from './components/CreateProductSheet'
 import QuickPriceChangeSheet from './components/QuickPriceChangeSheet'
 import AddBatchSheet from './components/AddBatchSheet'
 import BulkPrintSheet from './components/BulkPrintSheet'
-import TalkerPrintSheet from './components/TalkerPrintSheet'
+import PromotionsView from './components/PromotionsView'
 import { pruneImageCache } from './lib/db'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ export default function App() {
   const [priceChangeOpen, setPriceChangeOpen] = useState(false)
   const [addBatchOpen, setAddBatchOpen] = useState(false)
   const [bulkPrintOpen, setBulkPrintOpen] = useState(false)
-  const [talkerPrintOpen, setTalkerPrintOpen] = useState(false)
+  const [promosOpen, setPromosOpen] = useState(false)
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
@@ -171,7 +171,7 @@ export default function App() {
         onChangePrice={() => setPriceChangeOpen(true)}
         onAddExpiry={() => setAddBatchOpen(true)}
         onBulkPrint={() => setBulkPrintOpen(true)}
-        onPrintTalkers={() => setTalkerPrintOpen(true)}
+        onPromotions={() => setPromosOpen(true)}
       />
 
       <SmartScanner
@@ -214,10 +214,22 @@ export default function App() {
         onClose={() => setAddBatchOpen(false)}
       />
 
-      <TalkerPrintSheet
-        open={talkerPrintOpen}
-        onClose={() => setTalkerPrintOpen(false)}
-      />
+      {/* ── Promotions full-screen overlay ── */}
+      {promosOpen && (
+        <>
+          <div className="fixed inset-0 z-40 bg-white flex flex-col max-w-[480px] mx-auto">
+            <header className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 shrink-0">
+              <h1 className="text-base font-semibold text-gray-900">Promotions</h1>
+              <button onClick={() => setPromosOpen(false)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500" aria-label="Close">
+                <X size={18} />
+              </button>
+            </header>
+            <main className="flex-1 overflow-auto">
+              <PromotionsView />
+            </main>
+          </div>
+        </>
+      )}
     </div>
   )
 }
