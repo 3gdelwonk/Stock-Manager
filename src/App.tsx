@@ -1,5 +1,5 @@
 /// <reference types="vite-plugin-pwa/react" />
-import { Component, useState, type ReactNode } from 'react'
+import { Component, useState, useEffect, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 import { LayoutDashboard, Warehouse, Clock, BarChart2, Lightbulb, Settings, Plus } from 'lucide-react'
 import { useConnectionMonitor } from './lib/useConnectionMonitor'
@@ -16,6 +16,7 @@ import SmartScanner from './components/SmartScanner'
 import CreateProductSheet from './components/CreateProductSheet'
 import QuickPriceChangeSheet from './components/QuickPriceChangeSheet'
 import AddBatchSheet from './components/AddBatchSheet'
+import { pruneImageCache } from './lib/db'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
 
@@ -81,7 +82,8 @@ const LAST_TAB_KEY = 'grocery-manager-last-tab'
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
-    const saved = localStorage.getItem(LAST_TAB_KEY) as Tab | null
+    let saved: string | null = null
+    try { saved = localStorage.getItem(LAST_TAB_KEY) } catch { /* private mode */ }
     // Migrate old tab names
     if (saved === 'products' as string || saved === 'promos' as string) return 'stock'
     if (saved === 'performance' as string) return 'track'
@@ -91,6 +93,9 @@ export default function App() {
   const [showConnHistory, setShowConnHistory] = useState(false)
   const conn = useConnectionMonitor()
   const [stockAction, setStockAction] = useState<'scan' | 'search' | null>(null)
+
+  // Prune stale image cache entries on mount
+  useEffect(() => { pruneImageCache().catch(() => {}) }, [])
 
   // ── Global quick actions state ──
   const [quickActionsOpen, setQuickActionsOpen] = useState(false)

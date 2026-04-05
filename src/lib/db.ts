@@ -83,6 +83,15 @@ class GroceryManagerDB extends Dexie {
 
 export const db = new GroceryManagerDB()
 
+/** Remove imageCache entries older than maxAgeDays (default 30). Call on app init. */
+export async function pruneImageCache(maxAgeDays = 30): Promise<number> {
+  const cutoff = new Date()
+  cutoff.setDate(cutoff.getDate() - maxAgeDays)
+  const old = await db.imageCache.where('fetchedAt').below(cutoff).primaryKeys()
+  if (old.length > 0) await db.imageCache.bulkDelete(old)
+  return old.length
+}
+
 export async function clearAllData(): Promise<void> {
   await db.transaction('rw', [
     db.products, db.stockSnapshots, db.salesRecords, db.promotions,

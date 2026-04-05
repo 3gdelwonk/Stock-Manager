@@ -43,7 +43,7 @@ export default function PerformanceView() {
       const today = new Date().toISOString().slice(0, 10)
       const codes = new Set(data.items.filter(p => p.startDate.slice(0, 10) <= today).map(p => p.itemCode))
       setPromoItemCodes(codes)
-    }).catch(() => {})
+    }).catch(e => console.warn('Failed to load promotions:', e))
   }, [])
 
   const leadTime = LEAD_TIME_DEFAULT
@@ -68,11 +68,12 @@ export default function PerformanceView() {
 
     const matrix = opportunityMatrix(products, latestQoh, perfMap)
 
-    // ABC distribution
+    // ABC distribution (use Set for O(1) lookup instead of O(n) .some())
     const abcDist = { A: 0, B: 0, C: 0, D: 0 }
     const xyzDist = { X: 0, Y: 0, Z: 0 }
-    for (const [id, cls] of abcMap) { if (products.some(p => p.id === id)) abcDist[cls]++ }
-    for (const [id, cls] of xyzMap) { if (products.some(p => p.id === id)) xyzDist[cls]++ }
+    const validIds = new Set(products.filter(p => p.id !== undefined).map(p => p.id!))
+    for (const [id, cls] of abcMap) { if (validIds.has(id)) abcDist[cls]++ }
+    for (const [id, cls] of xyzMap) { if (validIds.has(id)) xyzDist[cls]++ }
 
     const deadStock = products.filter(p => p.id && abcMap.get(p.id) === 'D' && (latestQoh.get(p.id) ?? 0) > 0)
       .map(p => ({ product: p, qoh: latestQoh.get(p.id!) ?? 0, value: (latestQoh.get(p.id!) ?? 0) * p.costPrice }))

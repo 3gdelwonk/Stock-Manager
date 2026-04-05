@@ -51,8 +51,9 @@ const LAST_TAB_KEY = 'crew-app-last-tab'
 
 export default function CrewApp() {
   const [activeTab, setActiveTab] = useState<Tab>(() => {
-    const saved = localStorage.getItem(LAST_TAB_KEY) as Tab | null
-    return saved && TABS.some(t => t.id === saved) ? saved : 'lookup'
+    let saved: string | null = null
+    try { saved = localStorage.getItem(LAST_TAB_KEY) } catch { /* private mode */ }
+    return saved && TABS.some(t => t.id === saved) ? saved as Tab : 'lookup'
   })
 
   function handleTabChange(tab: Tab) {

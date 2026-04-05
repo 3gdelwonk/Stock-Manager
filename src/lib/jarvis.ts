@@ -13,17 +13,25 @@ function isLiquor(dept: string): boolean {
   return EXCLUDED_DEPTS.has(dept.toUpperCase().trim())
 }
 
+function safeGetItem(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+
 function getBaseUrl(): string {
-  return localStorage.getItem('grocery-manager-jarvis-url') || (import.meta.env.VITE_JARVIS_URL as string) || DEFAULT_URL
+  return safeGetItem('grocery-manager-jarvis-url') || (import.meta.env.VITE_JARVIS_URL as string) || DEFAULT_URL
 }
 function getApiKey(): string {
-  return localStorage.getItem('grocery-manager-jarvis-key') || (import.meta.env.VITE_JARVIS_API_KEY as string) || DEFAULT_KEY
+  return safeGetItem('grocery-manager-jarvis-key') || (import.meta.env.VITE_JARVIS_API_KEY as string) || DEFAULT_KEY
 }
+
+const FETCH_TIMEOUT = 15_000
 
 export { getBaseUrl, getApiKey }
 
 async function jarvisFetch<T>(path: string): Promise<T> {
   const url = `${getBaseUrl()}${path}`
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
   let res: Response
   try {
     res = await fetch(url, {
@@ -31,14 +39,20 @@ async function jarvisFetch<T>(path: string): Promise<T> {
         'X-API-Key': getApiKey(),
         'Content-Type': 'application/json',
       },
+      signal: controller.signal,
     })
   } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      throw new Error(`Request to ${getBaseUrl()} timed out after ${FETCH_TIMEOUT / 1000}s`)
+    }
     const base = getBaseUrl()
     // Diagnose common issues
     if (typeof window !== 'undefined' && window.location.protocol === 'https:' && base.startsWith('http:')) {
       throw new Error(`Mixed content blocked: cannot call HTTP API (${base}) from HTTPS page. Use Settings to set an HTTPS URL, or open this app via HTTP.`)
     }
     throw new Error(`Network error reaching ${base} — check the URL in Settings and ensure JARVISmart is reachable. (${(err as Error).message})`)
+  } finally {
+    clearTimeout(timeout)
   }
   if (!res.ok) throw new Error(`JARVISmart ${res.status}: ${res.statusText}`)
   return res.json() as Promise<T>
@@ -46,6 +60,8 @@ async function jarvisFetch<T>(path: string): Promise<T> {
 
 async function jarvisMutate<T>(path: string, method: 'POST' | 'PUT', body: unknown): Promise<T> {
   const url = `${getBaseUrl()}${path}`
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
   let res: Response
   try {
     res = await fetch(url, {
@@ -55,13 +71,19 @@ async function jarvisMutate<T>(path: string, method: 'POST' | 'PUT', body: unkno
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     })
   } catch (err) {
+    if ((err as Error).name === 'AbortError') {
+      throw new Error(`Request to ${getBaseUrl()} timed out after ${FETCH_TIMEOUT / 1000}s`)
+    }
     const base = getBaseUrl()
     if (typeof window !== 'undefined' && window.location.protocol === 'https:' && base.startsWith('http:')) {
       throw new Error(`Mixed content blocked: cannot call HTTP API (${base}) from HTTPS page.`)
     }
     throw new Error(`Network error reaching ${base} — ${(err as Error).message}`)
+  } finally {
+    clearTimeout(timeout)
   }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)

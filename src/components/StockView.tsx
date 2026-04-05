@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from 'react'
 import {
   RefreshCw, WifiOff, Search, ScanBarcode, X, ChevronDown, ChevronUp,
   TrendingUp, TrendingDown, Tag, AlertTriangle, Clock, DollarSign,
@@ -67,7 +67,7 @@ interface EnrichedStockItem {
 
 // ── Stock Card ────────────────────────────────────────────────────────────────
 
-function StockCard({
+const StockCard = memo(function StockCard({
   item,
   onPriceChange,
   onCompare,
@@ -83,6 +83,7 @@ function StockCard({
   const { stock, promo, topSeller, slowMover, margin, expiryInfo } = item
   const [expanded, setExpanded] = useState(false)
   const [actionMsg, setActionMsg] = useState<string | null>(null)
+  const actionMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [orderInfo, setOrderInfo] = useState<OrderInfo | null>(null)
   const [orderLoading, setOrderLoading] = useState(false)
   const orderFetched = useRef(false)
@@ -93,6 +94,16 @@ function StockCard({
   const [locEdit, setLocEdit] = useState(false)
   const [loc, setLoc] = useState({ aisle: '', bay: '', shelf: '', section: '' })
   const locLoaded = useRef(false)
+
+  function showActionMsg(msg: string) {
+    setActionMsg(msg)
+    if (actionMsgTimer.current) clearTimeout(actionMsgTimer.current)
+    actionMsgTimer.current = setTimeout(() => setActionMsg(null), 2000)
+  }
+
+  useEffect(() => {
+    return () => { if (actionMsgTimer.current) clearTimeout(actionMsgTimer.current) }
+  }, [])
 
   useEffect(() => {
     if (expanded && !locLoaded.current) {
@@ -111,8 +122,7 @@ function StockCard({
       await db.products.update(p.id, { aisle: loc.aisle, bay: loc.bay, shelf: loc.shelf, section: loc.section, updatedAt: new Date() })
     }
     setLocEdit(false)
-    setActionMsg('Location saved')
-    setTimeout(() => setActionMsg(null), 2000)
+    showActionMsg('Location saved')
   }
 
   const lowStock = stock.onHand > 0 && stock.onHand <= stock.reorderLevel
@@ -141,8 +151,7 @@ function StockCard({
     await setPrimaryBarcode(stock.itemCode, newPrimary)
     const updated = await getAliasesForItem(stock.itemCode)
     setAliases(updated)
-    setActionMsg(`Primary barcode set to ${newPrimary}`)
-    setTimeout(() => setActionMsg(null), 2000)
+    showActionMsg(`Primary barcode set to ${newPrimary}`)
   }
 
   const primarySupplier = orderInfo?.suppliers?.find(s => s.isPrimary) ?? orderInfo?.suppliers?.[0] ?? null
@@ -150,9 +159,8 @@ function StockCard({
   async function handlePrintLabel() {
     try {
       await printLabel(stock.barcode || stock.itemCode)
-      setActionMsg('Label queued')
-      setTimeout(() => setActionMsg(null), 2000)
-    } catch { setActionMsg('Failed') }
+      showActionMsg('Label queued')
+    } catch { showActionMsg('Print failed') }
   }
 
   return (
@@ -505,7 +513,7 @@ function StockCard({
       )}
     </div>
   )
-}
+})
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
@@ -527,6 +535,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
   const [search, setSearch] = useState('')
   const [deptFilter, setDeptFilter] = useState('All')
   const [sortKey, setSortKey] = useState<SortKey>('revenue')
+  const [displayLimit, setDisplayLimit] = useState(100)
   const [scannerOpen, setScannerOpen] = useState(false)
 
   // Order code search: when search looks like an order code and no local match,
@@ -632,11 +641,10 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
           setImgProgress(prev => prev?.creditsExhausted ? prev : null)
         }, 5000)
       })
-      .catch(() => { /* aborted or error — silently stop */ })
+      .catch(e => { if (e?.name !== 'AbortError') console.warn('Image prefetch error:', e) })
 
     return () => { controller.abort() }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stockItems.length > 0]) // only fires once: false → true
+  }, [stockItems]) // imgStartedRef guard ensures this only runs once
 
   // ── Build lookup maps ──
   const promoMap = useMemo(() => {
@@ -725,12 +733,24 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     })
   }, [stockItems, promoMap, topSellerCodes, slowMoverCodes, revenueMap, expiryMap])
 
-  // ── Department list ──
-  const departments = useMemo(() => {
-    const depts = new Set<string>()
-    for (const item of enrichedItems) depts.add(item.stock.department)
-    return ['All', ...Array.from(depts).sort()]
+  // ── Department list + counts (single pass) ──
+  const { departments, deptCounts } = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const item of enrichedItems) {
+      const d = item.stock.department
+      counts.set(d, (counts.get(d) ?? 0) + 1)
+    }
+    return {
+      departments: ['All', ...Array.from(counts.keys()).sort()],
+      deptCounts: counts,
+    }
   }, [enrichedItems])
+
+  // ── Out-of-stock count (memoized) ──
+  const outOfStockCount = useMemo(
+    () => enrichedItems.filter(e => e.stock.onHand <= 0).length,
+    [enrichedItems]
+  )
 
   // ── Order code server lookup (debounced) ──
   // When search looks numeric and doesn't match any local barcode/itemCode,
@@ -746,23 +766,29 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       s.description.toLowerCase().includes(q.toLowerCase())
     )
     if (hasLocalMatch) return
-    // Debounce 500ms then search all items for this order code
+    // Debounce 500ms then search items in batches for this order code
+    // TODO: Add a server-side /api/pos/order-code-lookup/:code endpoint for efficiency
     orderCodeSearchRef.current = setTimeout(async () => {
-      // Try each stock item — but that's too many. Instead, search via description hint.
-      // The order-info endpoint needs an itemCode, so we need a reverse lookup.
-      // For now, try the top 50 items by revenue to see if any match.
-      // TODO: Add a server-side /api/pos/order-code-lookup/:code endpoint for efficiency
-      for (const item of stockItems.slice(0, 200)) {
-        const info = await getOrderInfo(item.itemCode)
-        if (info?.suppliers?.some(s => s.orderCode === q || s.orderCodeRaw?.includes(q))) {
-          setOrderCodeItemCode(item.itemCode)
-          return
+      const BATCH_SIZE = 10
+      const candidates = stockItems.slice(0, 200)
+      for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+        const batch = candidates.slice(i, i + BATCH_SIZE)
+        const results = await Promise.allSettled(
+          batch.map(item => getOrderInfo(item.itemCode))
+        )
+        for (let j = 0; j < results.length; j++) {
+          const r = results[j]
+          if (r.status === 'fulfilled' && r.value?.suppliers?.some(
+            s => s.orderCode === q || s.orderCodeRaw?.includes(q)
+          )) {
+            setOrderCodeItemCode(batch[j].itemCode)
+            return
+          }
         }
       }
     }, 500)
     return () => { if (orderCodeSearchRef.current) clearTimeout(orderCodeSearchRef.current) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, stockItems.length > 0])
+  }, [search, stockItems])
 
   // ── Barcode alias lookup (debounced) ──
   // When search is a long numeric barcode that doesn't match locally,
@@ -780,8 +806,10 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       if (resolved) setAliasItemCode(resolved.itemCode)
     }, 300)
     return () => { if (aliasSearchRef.current) clearTimeout(aliasSearchRef.current) }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, stockItems.length > 0])
+  }, [search, stockItems])
+
+  // Reset display limit when filters change
+  useEffect(() => { setDisplayLimit(100) }, [search, deptFilter, sortKey])
 
   // ── Filter + sort ──
   const filteredItems = useMemo(() => {
@@ -855,10 +883,10 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
               {promos.length} on promo
             </span>
           )}
-          {enrichedItems.filter(e => e.stock.onHand <= 0).length > 0 && (
+          {outOfStockCount > 0 && (
             <span className="flex items-center gap-0.5 text-xs font-medium text-red-600">
               <AlertTriangle size={12} />
-              {enrichedItems.filter(e => e.stock.onHand <= 0).length} out
+              {outOfStockCount} out
             </span>
           )}
         </div>
@@ -953,7 +981,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
             }`}
           >
-            {dept === 'All' ? `All (${enrichedItems.length})` : `${dept} (${enrichedItems.filter(e => e.stock.department === dept).length})`}
+            {dept === 'All' ? `All (${enrichedItems.length})` : `${dept} (${deptCounts.get(dept) ?? 0})`}
           </button>
         ))}
       </div>
@@ -987,16 +1015,26 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
             </p>
           </div>
         ) : (
-          filteredItems.map(item => (
-            <StockCard
-              key={item.stock.itemCode}
-              item={item}
-              onPriceChange={setPriceTarget}
-              onCompare={setCompareTarget}
-              onAddExpiry={setExpiryTarget}
-              onAdjustStock={setAdjustTarget}
-            />
-          ))
+          <>
+            {filteredItems.slice(0, displayLimit).map(item => (
+              <StockCard
+                key={item.stock.itemCode}
+                item={item}
+                onPriceChange={setPriceTarget}
+                onCompare={setCompareTarget}
+                onAddExpiry={setExpiryTarget}
+                onAdjustStock={setAdjustTarget}
+              />
+            ))}
+            {filteredItems.length > displayLimit && (
+              <button
+                onClick={() => setDisplayLimit(prev => prev + 100)}
+                className="w-full py-3 text-sm text-emerald-600 font-medium bg-emerald-50 rounded-xl hover:bg-emerald-100 transition-colors"
+              >
+                Show more ({filteredItems.length - displayLimit} remaining)
+              </button>
+            )}
+          </>
         )}
 
         {/* Last refresh timestamp */}

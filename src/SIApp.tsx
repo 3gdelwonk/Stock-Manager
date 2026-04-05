@@ -24,7 +24,8 @@ const VIEW_TITLES: Record<SIView, string> = {
 }
 
 function getView(): SIView {
-  const stored = localStorage.getItem(STORAGE_KEY)
+  let stored: string | null = null
+  try { stored = localStorage.getItem(STORAGE_KEY) } catch { /* private mode */ }
   if (stored && stored in VIEW_TITLES) return stored as SIView
   return 'expiry'
 }

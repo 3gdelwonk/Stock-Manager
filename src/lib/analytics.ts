@@ -22,11 +22,16 @@ function isoToday(): string {
 // ─── Latest QOH ──────────────────────────────────────────────────────────────
 
 export function getLatestQoh(snapshots: StockSnapshot[]): Map<number, number> {
-  const map = new Map<number, number>()
+  const latestByProduct = new Map<number, StockSnapshot>()
   for (const s of snapshots) {
-    const existing = snapshots.filter(x => x.productId === s.productId)
-    const latest = existing.reduce((best, x) => x.importedAt > best.importedAt ? x : best, existing[0])
-    if (latest) map.set(s.productId, latest.qoh)
+    const existing = latestByProduct.get(s.productId)
+    if (!existing || s.importedAt > existing.importedAt) {
+      latestByProduct.set(s.productId, s)
+    }
+  }
+  const map = new Map<number, number>()
+  for (const [id, snap] of latestByProduct) {
+    map.set(id, snap.qoh)
   }
   return map
 }
