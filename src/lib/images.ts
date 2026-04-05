@@ -69,7 +69,7 @@ export async function deleteCachedImage(itemCode: string): Promise<void> {
   await db.imageCache.delete(itemCode)
 }
 
-// ── Fetch & cache (used by bulk prefetch + single refetch) ─────────────────
+// ── Fetch & cache (used by single refetch + manual picker) ───────────────
 // Server-side Serper via JARVISmart proxy. No client-side API keys.
 
 export async function fetchAndCacheImage(
@@ -127,6 +127,9 @@ export async function fetchAndCacheImage(
 }
 
 // ── Bulk prefetch ───────────────────────────────────────────────────────────
+// Two-pass strategy:
+//   Pass 1 (fast): Batch-fetch from JARVISmart DB in parallel — no rate limit needed
+//   Pass 2 (slow): Serper image search for remaining — 1.1s delay per item
 
 export interface PrefetchProgress {
   total: number
@@ -136,13 +139,17 @@ export interface PrefetchProgress {
   skipped: number
   current: string
   creditsExhausted?: boolean
+  phase?: 'jarvis' | 'serper'
 }
+
+const JARVIS_BATCH_SIZE = 20
 
 export async function prefetchImages(
   items: { itemCode: string; description: string; department: string; barcode?: string | null }[],
   onProgress?: (p: PrefetchProgress) => void,
   signal?: AbortSignal,
 ): Promise<{ fetched: number; found: number }> {
+  // Filter out items already in local IndexedDB cache
   const uncached: typeof items = []
   let skipped = 0
   try {
@@ -155,38 +162,102 @@ export async function prefetchImages(
   } catch { /* IndexedDB error */ }
 
   if (uncached.length === 0) {
-    onProgress?.({ total: 0, done: 0, found: 0, errors: 0, skipped, current: '' })
+    onProgress?.({ total: 0, done: 0, found: 0, errors: 0, skipped, current: '', phase: 'jarvis' })
     return { fetched: 0, found: 0 }
   }
 
-  let done = 0, found = 0, errors = 0, consecutiveErrors = 0
-  onProgress?.({ total: uncached.length, done, found, errors, skipped, current: uncached[0]?.description ?? '' })
+  let done = 0, found = 0, errors = 0
+  const total = uncached.length
 
-  for (const item of uncached) {
+  onProgress?.({ total, done, found, errors, skipped, current: 'Checking JARVISmart database...', phase: 'jarvis' })
+
+  // ── Pass 1: Batch-fetch from JARVISmart DB (fast, parallel) ──
+  const needsSerper: typeof items = []
+
+  for (let i = 0; i < uncached.length; i += JARVIS_BATCH_SIZE) {
     if (signal?.aborted) break
-    try {
-      const result = await fetchAndCacheImage(item.itemCode, item.description, item.department, item.barcode)
-      done++
-      if (result.url) {
+    const batch = uncached.slice(i, i + JARVIS_BATCH_SIZE)
+
+    const results = await Promise.allSettled(
+      batch.map(item => getJarvisImage(item.itemCode))
+    )
+
+    for (let j = 0; j < batch.length; j++) {
+      const item = batch[j]
+      const result = results[j]
+      const imageUrl = result.status === 'fulfilled' ? result.value : null
+
+      if (imageUrl) {
+        // Found in JARVISmart DB — cache locally
+        await db.imageCache.put({ itemCode: item.itemCode, imageUrl, fetchedAt: new Date() })
+        window.dispatchEvent(new CustomEvent('image-cached', { detail: { itemCode: item.itemCode, imageUrl } }))
         found++
-        consecutiveErrors = 0
-      } else if (result.allErrored) {
-        errors++
-        consecutiveErrors++
       } else {
-        consecutiveErrors = 0
+        // Not in JARVISmart — needs Serper search
+        needsSerper.push(item)
       }
-    } catch {
       done++
-      errors++
-      consecutiveErrors++
     }
 
-    const exhausted = consecutiveErrors >= 5
-    onProgress?.({ total: uncached.length, done, found, errors, skipped, current: item.description, creditsExhausted: exhausted })
-    if (exhausted) break
-    await new Promise(r => setTimeout(r, 1100))
+    onProgress?.({ total, done, found, errors, skipped, current: batch[batch.length - 1]?.description ?? '', phase: 'jarvis' })
   }
+
+  // ── Pass 2: Serper image search for remaining (slow, rate-limited) ──
+  if (needsSerper.length > 0 && !signal?.aborted) {
+    onProgress?.({ total, done, found, errors, skipped, current: 'Searching for remaining images...', phase: 'serper' })
+
+    let consecutiveErrors = 0
+
+    for (const item of needsSerper) {
+      if (signal?.aborted) break
+
+      if (!canUseSerper('images')) {
+        onProgress?.({ total, done, found, errors, skipped, current: item.description, creditsExhausted: true, phase: 'serper' })
+        break
+      }
+
+      try {
+        let imageUrl: string | null = null
+        let anySearchWorked = false
+
+        const r = await serverImageSearchBest(buildSearchQuery(item.description, item.department))
+        if (r !== 'error') { anySearchWorked = true; if (r) imageUrl = r }
+
+        if (!imageUrl && item.barcode) {
+          const r2 = await serverImageSearchBest(buildSearchQuery(item.description, item.department, item.barcode))
+          if (r2 !== 'error') { anySearchWorked = true; if (r2) imageUrl = r2 }
+        }
+
+        await markSerperSearched(item.itemCode)
+
+        if (imageUrl) {
+          await db.imageCache.put({ itemCode: item.itemCode, imageUrl, fetchedAt: new Date() })
+          pushImageToJarvis(item.itemCode, imageUrl)
+          window.dispatchEvent(new CustomEvent('image-cached', { detail: { itemCode: item.itemCode, imageUrl } }))
+          found++
+          consecutiveErrors = 0
+        } else if (anySearchWorked) {
+          await db.imageCache.put({ itemCode: item.itemCode, imageUrl: '', fetchedAt: new Date() })
+          consecutiveErrors = 0
+        } else {
+          errors++
+          consecutiveErrors++
+        }
+      } catch {
+        errors++
+        consecutiveErrors++
+      }
+
+      done++
+      const exhausted = consecutiveErrors >= 5
+      onProgress?.({ total, done, found, errors, skipped, current: item.description, creditsExhausted: exhausted, phase: 'serper' })
+      if (exhausted) break
+
+      // Rate limit only for Serper requests
+      await new Promise(r => setTimeout(r, 1100))
+    }
+  }
+
   return { fetched: done, found }
 }
 

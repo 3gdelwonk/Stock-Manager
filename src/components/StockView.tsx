@@ -931,7 +931,9 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
                   ? `Image search unavailable — ${imgProgress.total - imgProgress.done} products remaining. Check JARVISmart connection.`
                   : imgDone
                     ? `Done — ${imgProgress.found} new images saved${imgProgress.skipped ? `, ${imgProgress.skipped} already cached` : ''}`
-                    : `Fetching images: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`}
+                    : imgProgress.phase === 'jarvis'
+                      ? `Syncing images from server: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`
+                      : `Searching images: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`}
               </span>
               {!imgProgress.creditsExhausted && !imgDone && (
                 <span className="shrink-0 ml-2">{Math.round((imgProgress.done / Math.max(1, imgProgress.total)) * 100)}%</span>
