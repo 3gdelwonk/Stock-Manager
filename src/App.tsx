@@ -16,6 +16,7 @@ import SmartScanner from './components/SmartScanner'
 import CreateProductSheet from './components/CreateProductSheet'
 import QuickPriceChangeSheet from './components/QuickPriceChangeSheet'
 import AddBatchSheet from './components/AddBatchSheet'
+import BulkPrintSheet from './components/BulkPrintSheet'
 import { pruneImageCache } from './lib/db'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
@@ -103,6 +104,7 @@ export default function App() {
   const [createSheetOpen, setCreateSheetOpen] = useState(false)
   const [priceChangeOpen, setPriceChangeOpen] = useState(false)
   const [addBatchOpen, setAddBatchOpen] = useState(false)
+  const [bulkPrintOpen, setBulkPrintOpen] = useState(false)
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
@@ -176,6 +178,7 @@ export default function App() {
         onCreateProduct={() => { setQuickActionsOpen(false); setCreateSheetOpen(true) }}
         onChangePrice={() => { setQuickActionsOpen(false); setPriceChangeOpen(true) }}
         onAddExpiry={() => { setQuickActionsOpen(false); setAddBatchOpen(true) }}
+        onBulkPrint={() => { setQuickActionsOpen(false); setBulkPrintOpen(true) }}
       />
 
       <SmartScanner
@@ -206,6 +209,11 @@ export default function App() {
         open={priceChangeOpen}
         onClose={() => setPriceChangeOpen(false)}
         onSelectProduct={() => setPriceChangeOpen(false)}
+      />
+
+      <BulkPrintSheet
+        open={bulkPrintOpen}
+        onClose={() => setBulkPrintOpen(false)}
       />
 
       <AddBatchSheet
