@@ -1,4 +1,4 @@
-import{c as h,d as l,s as ne,j as s,R as D,F,S as Y,X as ce}from"./BarcodeScanner-CyLOZ0wK.js";import{r as f}from"./vendor-g3Nuhkd9.js";/**
+import{c as h,d as l,s as ne,j as s,R as D,F,S as Y,X as ce}from"./BarcodeScanner-CSil5xje.js";import{r as f}from"./vendor-g3Nuhkd9.js";/**
  * @license lucide-react v0.479.0 - ISC
  *
  * This source code is licensed under the ISC license.

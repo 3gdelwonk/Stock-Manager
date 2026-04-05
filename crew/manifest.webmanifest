@@ -4,6 +4,7 @@
   "description": "IGA Crew employee actions — price checks, stock adjustments & more",
   "start_url": "./",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#ffffff",
   "theme_color": "#ea580c",
   "lang": "en",
