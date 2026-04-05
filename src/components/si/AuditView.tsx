@@ -5,7 +5,6 @@ import {
 } from 'lucide-react'
 import { getRecentPriceChanges, type RecentPriceChange } from '../../lib/jarvis'
 import { db } from '../../lib/db'
-import type { WasteLogEntry, QuickActionLogEntry } from '../../lib/types'
 
 // ── Unified audit entry ─────────────────────────────────────────────────────
 
