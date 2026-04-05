@@ -22,6 +22,7 @@ import PriceChangeModal from './PriceChangeModal'
 import CompetitivePriceSheet from './CompetitivePriceSheet'
 import AddBatchSheet from './AddBatchSheet'
 import StockAdjustModal from './StockAdjustModal'
+import PromotionsView from './PromotionsView'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -555,6 +556,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
   const [compareTarget, setCompareTarget] = useState<StockItem | null>(null)
   const [expiryTarget, setExpiryTarget] = useState<StockItem | null>(null)
   const [adjustTarget, setAdjustTarget] = useState<StockItem | null>(null)
+  const [showPromos, setShowPromos] = useState(false)
 
   // ── Hooks for enrichment ──
   const expiryMap = useProductExpiry()
@@ -873,17 +875,27 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
       {/* ── Summary bar ── */}
       <div className="flex items-center justify-between px-4 py-2 bg-emerald-50 border-b border-emerald-100 shrink-0">
         <div className="flex items-center gap-2">
-          <Warehouse size={14} className="text-emerald-600" />
-          <span className="text-xs font-medium text-emerald-800">
+          <button
+            onClick={() => setShowPromos(false)}
+            className={`flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full transition-colors ${
+              !showPromos ? 'bg-emerald-600 text-white' : 'text-emerald-700 hover:bg-emerald-100'
+            }`}
+          >
+            <Warehouse size={12} />
             {stockItems.length} products
-          </span>
+          </button>
           {promos.length > 0 && (
-            <span className="flex items-center gap-0.5 text-xs font-medium text-amber-600">
+            <button
+              onClick={() => setShowPromos(true)}
+              className={`flex items-center gap-0.5 text-xs font-medium px-2 py-0.5 rounded-full transition-colors ${
+                showPromos ? 'bg-amber-500 text-white' : 'text-amber-600 hover:bg-amber-100'
+              }`}
+            >
               <Tag size={12} />
               {promos.length} on promo
-            </span>
+            </button>
           )}
-          {outOfStockCount > 0 && (
+          {!showPromos && outOfStockCount > 0 && (
             <span className="flex items-center gap-0.5 text-xs font-medium text-red-600">
               <AlertTriangle size={12} />
               {outOfStockCount} out
@@ -895,7 +907,16 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
         </button>
       </div>
 
+      {/* ── Promotions view (toggled from summary bar) ── */}
+      {showPromos && (
+        <div className="flex-1 overflow-auto">
+          <PromotionsView />
+        </div>
+      )}
+
       {/* ── Image prefetch banner ── */}
+      {!showPromos && (
+      <>
       {imgProgress && (imgProgress.total > 0 || imgProgress.creditsExhausted) && (
         <div className={`flex items-center gap-2 px-4 py-1.5 border-b shrink-0 ${
           imgProgress.creditsExhausted ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-100'
@@ -1044,6 +1065,9 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
           </p>
         )}
       </div>
+
+      </>
+      )}
 
       {/* ── Modals ── */}
       <BarcodeScanner open={scannerOpen} onScan={handleBarcodeScan} onClose={() => setScannerOpen(false)} />
