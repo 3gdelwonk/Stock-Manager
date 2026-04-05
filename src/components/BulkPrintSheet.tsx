@@ -46,24 +46,29 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   // Load printers and formats when sheet opens
   useEffect(() => {
     if (!open) return
+    let cancelled = false
     setPrintersLoading(true)
     setPrintersError(null)
     Promise.allSettled([getPrinters(), getLabelFormats()])
       .then(([printersRes, formatsRes]) => {
+        if (cancelled) return
         if (printersRes.status === 'fulfilled') {
-          setPrinters(printersRes.value.printers)
-          const def = printersRes.value.printers.find(p => p.isDefault)
+          const list = Array.isArray(printersRes.value?.printers) ? printersRes.value.printers : []
+          setPrinters(list)
+          const def = list.find(p => p.isDefault)
           if (def) setSelectedPrinter(def.id)
-          else if (printersRes.value.printers.length > 0) setSelectedPrinter(printersRes.value.printers[0].id)
+          else if (list.length > 0) setSelectedPrinter(list[0].id)
         } else {
           setPrintersError('Could not load printers')
         }
         if (formatsRes.status === 'fulfilled') {
-          setFormats(formatsRes.value.formats)
-          if (formatsRes.value.formats.length > 0) setSelectedFormat(formatsRes.value.formats[0].id)
+          const list = Array.isArray(formatsRes.value?.formats) ? formatsRes.value.formats : []
+          setFormats(list)
+          if (list.length > 0) setSelectedFormat(list[0].id)
         }
       })
-      .finally(() => setPrintersLoading(false))
+      .finally(() => { if (!cancelled) setPrintersLoading(false) })
+    return () => { cancelled = true }
   }, [open])
 
   const doSearch = useCallback(async (q: string) => {
