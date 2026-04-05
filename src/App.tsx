@@ -1,7 +1,7 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, useEffect, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { LayoutDashboard, Warehouse, Clock, BarChart2, Lightbulb, Settings, Plus } from 'lucide-react'
+import { LayoutDashboard, Warehouse, Clock, BarChart2, Lightbulb, Settings } from 'lucide-react'
 import { useConnectionMonitor } from './lib/useConnectionMonitor'
 import ConnectionStatusBadge from './components/ConnectionStatusBadge'
 import ConnectionHistorySheet from './components/ConnectionHistorySheet'
@@ -11,7 +11,7 @@ import ExpiryView from './components/ExpiryView'
 import PerformanceView from './components/PerformanceView'
 import InsightView from './components/InsightView'
 import SettingsSheet from './components/SettingsSheet'
-import QuickActionsSheet from './components/QuickActionsSheet'
+import FABMenu from './components/FABMenu'
 import SmartScanner from './components/SmartScanner'
 import CreateProductSheet from './components/CreateProductSheet'
 import QuickPriceChangeSheet from './components/QuickPriceChangeSheet'
@@ -100,7 +100,6 @@ export default function App() {
   useEffect(() => { pruneImageCache().catch(() => {}) }, [])
 
   // ── Global quick actions state ──
-  const [quickActionsOpen, setQuickActionsOpen] = useState(false)
   const [smartScannerOpen, setSmartScannerOpen] = useState(false)
   const [createSheetOpen, setCreateSheetOpen] = useState(false)
   const [priceChangeOpen, setPriceChangeOpen] = useState(false)
@@ -137,13 +136,6 @@ export default function App() {
         <h1 className="text-base font-semibold text-gray-900">{TAB_TITLES[activeTab]}</h1>
         <div className="flex items-center gap-1">
           <ConnectionStatusBadge connected={conn.connected} compact onClick={() => setShowConnHistory(true)} />
-          <button
-            onClick={() => setQuickActionsOpen(true)}
-            className="p-1.5 rounded-full bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
-            aria-label="Quick actions"
-          >
-            <Plus size={18} />
-          </button>
           <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-full hover:bg-gray-100 text-gray-500" aria-label="Settings">
             <Settings size={18} />
           </button>
@@ -173,15 +165,13 @@ export default function App() {
       <ConnectionHistorySheet open={showConnHistory} onClose={() => setShowConnHistory(false)} />
       {showSettings && <SettingsSheet onClose={() => setShowSettings(false)} />}
 
-      <QuickActionsSheet
-        open={quickActionsOpen}
-        onClose={() => setQuickActionsOpen(false)}
-        onSmartScan={() => { setQuickActionsOpen(false); setSmartScannerOpen(true) }}
-        onCreateProduct={() => { setQuickActionsOpen(false); setCreateSheetOpen(true) }}
-        onChangePrice={() => { setQuickActionsOpen(false); setPriceChangeOpen(true) }}
-        onAddExpiry={() => { setQuickActionsOpen(false); setAddBatchOpen(true) }}
-        onBulkPrint={() => { setQuickActionsOpen(false); setBulkPrintOpen(true) }}
-        onPrintTalkers={() => { setQuickActionsOpen(false); setTalkerPrintOpen(true) }}
+      <FABMenu
+        onSmartScan={() => setSmartScannerOpen(true)}
+        onCreateProduct={() => setCreateSheetOpen(true)}
+        onChangePrice={() => setPriceChangeOpen(true)}
+        onAddExpiry={() => setAddBatchOpen(true)}
+        onBulkPrint={() => setBulkPrintOpen(true)}
+        onPrintTalkers={() => setTalkerPrintOpen(true)}
       />
 
       <SmartScanner
