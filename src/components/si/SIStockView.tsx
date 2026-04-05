@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef, memo } from '
 import {
   RefreshCw, WifiOff, Search, X, ChevronDown, ChevronUp,
   TrendingUp, TrendingDown, Tag, AlertTriangle, Clock, DollarSign,
-  Printer, PackageMinus, BarChart3, Warehouse, ImageIcon,
+  Printer, PackageMinus, BarChart3, Warehouse,
   MapPin, Pencil, Check,
 } from 'lucide-react'
 import {
@@ -13,8 +13,6 @@ import {
 import { getAliasesForItem, setPrimaryBarcode } from '../../lib/barcodeResolver'
 import { db, type BarcodeAlias } from '../../lib/db'
 import { useProductExpiry, type ExpiryInfo } from '../../lib/useProductExpiry'
-import { prefetchImages, type PrefetchProgress } from '../../lib/images'
-import { computeImagePriority } from '../../lib/serper'
 import ProductImage from '../ProductImage'
 import BarcodeStripe from '../BarcodeStripe'
 import PriceChangeModal from '../PriceChangeModal'
@@ -409,11 +407,6 @@ export default function SIStockView() {
   const [aliasItemCode, setAliasItemCode] = useState<string | null>(null)
   const aliasSearchRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Image auto-prefetch
-  const [imgProgress, setImgProgress] = useState<PrefetchProgress | null>(null)
-  const [imgDone, setImgDone] = useState(false)
-  const imgAbortRef = useRef<AbortController | null>(null)
-
   // Modals
   const [priceTarget, setPriceTarget] = useState<StockItem | null>(null)
   const [compareTarget, setCompareTarget] = useState<StockItem | null>(null)
@@ -460,39 +453,6 @@ export default function SIStockView() {
     const interval = setInterval(() => fetchData(true), REFRESH_INTERVAL)
     return () => clearInterval(interval)
   }, [fetchData])
-
-  // ── Auto-prefetch images ──
-  const imgStartedRef = useRef(false)
-  useEffect(() => {
-    if (stockItems.length === 0 || imgStartedRef.current) return
-    imgStartedRef.current = true
-
-    const items = [...stockItems]
-      .map(s => ({ ...s, _priority: computeImagePriority({ avgDayQty: s.avgDayQty, sellPrice: s.sellPrice, avgCost: s.avgCost }) }))
-      .sort((a, b) => b._priority - a._priority)
-      .map(s => ({
-        itemCode: s.itemCode, description: s.description, department: s.department,
-        barcode: s.barcode ?? undefined,
-      }))
-
-    const controller = new AbortController()
-    imgAbortRef.current = controller
-    setImgDone(false)
-
-    prefetchImages(items, (p) => {
-      setImgProgress(p)
-      if (p.creditsExhausted) setImgDone(true)
-    }, controller.signal)
-      .then(() => {
-        setImgDone(true)
-        setTimeout(() => {
-          setImgProgress(prev => prev?.creditsExhausted ? prev : null)
-        }, 5000)
-      })
-      .catch(e => { if (e?.name !== 'AbortError') console.warn('Image prefetch error:', e) })
-
-    return () => { controller.abort() }
-  }, [stockItems])
 
   // ── Build lookup maps ──
   const promoMap = useMemo(() => {
@@ -709,39 +669,6 @@ export default function SIStockView() {
           Refresh
         </button>
       </div>
-
-      {/* ── Image prefetch banner ── */}
-      {imgProgress && (imgProgress.total > 0 || imgProgress.creditsExhausted) && (
-        <div className={`flex items-center gap-3 px-5 py-2.5 rounded-xl border ${
-          imgProgress.creditsExhausted ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-100'
-        }`}>
-          <ImageIcon size={14} className={imgProgress.creditsExhausted ? 'text-amber-600 shrink-0' : 'text-blue-600 shrink-0'} />
-          <div className="flex-1 min-w-0">
-            <div className={`flex items-center justify-between text-sm ${imgProgress.creditsExhausted ? 'text-amber-700' : 'text-blue-700'}`}>
-              <span className="truncate">
-                {imgProgress.creditsExhausted
-                  ? `Image search unavailable — ${imgProgress.total - imgProgress.done} products remaining`
-                  : imgDone
-                    ? `Done — ${imgProgress.found} new images saved${imgProgress.skipped ? `, ${imgProgress.skipped} already cached` : ''}`
-                    : `Fetching images: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`}
-              </span>
-              {!imgProgress.creditsExhausted && !imgDone && (
-                <span className="shrink-0 ml-3">{Math.round((imgProgress.done / Math.max(1, imgProgress.total)) * 100)}%</span>
-              )}
-            </div>
-            {!imgProgress.creditsExhausted && !imgDone && (
-              <div className="h-1.5 mt-1 bg-blue-200 rounded-full overflow-hidden">
-                <div className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                  style={{ width: `${(imgProgress.done / Math.max(1, imgProgress.total)) * 100}%` }} />
-              </div>
-            )}
-          </div>
-          <button onClick={() => { imgAbortRef.current?.abort(); setImgProgress(null) }}
-            className={`shrink-0 p-1 rounded ${imgProgress.creditsExhausted ? 'text-amber-400 hover:text-amber-600' : 'text-blue-400 hover:text-blue-600'}`}>
-            <X size={16} />
-          </button>
-        </div>
-      )}
 
       {/* ── Error banner ── */}
       {error && (
