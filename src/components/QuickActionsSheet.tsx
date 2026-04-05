@@ -1,4 +1,4 @@
-import { ScanBarcode, Plus, DollarSign, Clock, Printer } from 'lucide-react'
+import { ScanBarcode, Plus, DollarSign, Clock, Printer, Megaphone } from 'lucide-react'
 
 interface QuickActionsSheetProps {
   open: boolean
@@ -8,6 +8,7 @@ interface QuickActionsSheetProps {
   onChangePrice: () => void
   onAddExpiry: () => void
   onBulkPrint: () => void
+  onPrintTalkers: () => void
 }
 
 const actions = [
@@ -40,6 +41,13 @@ const actions = [
     key: 'bulkPrint',
   },
   {
+    label: 'Print Talkers',
+    description: 'Queue & print promo talkers',
+    icon: Megaphone,
+    bg: 'bg-amber-500',
+    key: 'printTalkers',
+  },
+  {
     label: 'Add Expiry',
     description: 'Track expiry dates on items',
     icon: Clock,
@@ -56,6 +64,7 @@ export default function QuickActionsSheet({
   onChangePrice,
   onAddExpiry,
   onBulkPrint,
+  onPrintTalkers,
 }: QuickActionsSheetProps) {
   if (!open) return null
 
@@ -65,6 +74,7 @@ export default function QuickActionsSheet({
     changePrice: onChangePrice,
     addExpiry: onAddExpiry,
     bulkPrint: onBulkPrint,
+    printTalkers: onPrintTalkers,
   }
 
   function handleAction(key: string) {

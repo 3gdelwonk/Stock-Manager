@@ -17,6 +17,7 @@ import CreateProductSheet from './components/CreateProductSheet'
 import QuickPriceChangeSheet from './components/QuickPriceChangeSheet'
 import AddBatchSheet from './components/AddBatchSheet'
 import BulkPrintSheet from './components/BulkPrintSheet'
+import TalkerPrintSheet from './components/TalkerPrintSheet'
 import { pruneImageCache } from './lib/db'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
@@ -105,6 +106,7 @@ export default function App() {
   const [priceChangeOpen, setPriceChangeOpen] = useState(false)
   const [addBatchOpen, setAddBatchOpen] = useState(false)
   const [bulkPrintOpen, setBulkPrintOpen] = useState(false)
+  const [talkerPrintOpen, setTalkerPrintOpen] = useState(false)
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
@@ -179,6 +181,7 @@ export default function App() {
         onChangePrice={() => { setQuickActionsOpen(false); setPriceChangeOpen(true) }}
         onAddExpiry={() => { setQuickActionsOpen(false); setAddBatchOpen(true) }}
         onBulkPrint={() => { setQuickActionsOpen(false); setBulkPrintOpen(true) }}
+        onPrintTalkers={() => { setQuickActionsOpen(false); setTalkerPrintOpen(true) }}
       />
 
       <SmartScanner
@@ -219,6 +222,11 @@ export default function App() {
       <AddBatchSheet
         open={addBatchOpen}
         onClose={() => setAddBatchOpen(false)}
+      />
+
+      <TalkerPrintSheet
+        open={talkerPrintOpen}
+        onClose={() => setTalkerPrintOpen(false)}
       />
     </div>
   )

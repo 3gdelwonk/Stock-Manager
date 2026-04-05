@@ -212,7 +212,7 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   async function loadPendingQueue() {
     setPendingLoading(true)
     try {
-      const res = await getLabelQueue(selectedPrinter ?? undefined)
+      const res = await getLabelQueue('label', selectedPrinter ?? undefined)
       if (Array.isArray(res?.items)) setPendingLabels(res.items)
       else setPendingLabels([])
     } catch { setPendingLabels([]) }

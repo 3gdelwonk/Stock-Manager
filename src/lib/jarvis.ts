@@ -720,6 +720,26 @@ export async function createPromo(promo: CreatePromoRequest): Promise<CreateProm
   )
 }
 
+// ── Print Talkers ────────────────────────────────────────────────────────────
+
+export interface PrintTalkersResponse {
+  ok: boolean
+  promoType: string
+  slot?: number
+  created: number
+  failed: string[]
+  total: number
+  message?: string
+}
+
+export async function printTalkers(promoType: string): Promise<PrintTalkersResponse> {
+  return jarvisMutate<PrintTalkersResponse>(
+    '/api/pos-actions/print-talker',
+    'POST',
+    { promoType },
+  )
+}
+
 // ── Print Label ──────────────────────────────────────────────────────────────
 
 export interface PrintLabelResponse {
@@ -787,8 +807,8 @@ export interface LabelQueueResponse {
   items: LabelQueueItem[]
 }
 
-export async function getLabelQueue(printerId?: number): Promise<LabelQueueResponse> {
-  const params = new URLSearchParams({ type: 'label' })
+export async function getLabelQueue(type: 'label' | 'talker' = 'label', printerId?: number): Promise<LabelQueueResponse> {
+  const params = new URLSearchParams({ type })
   if (printerId != null) params.set('printerId', String(printerId))
   return jarvisFetch<LabelQueueResponse>(`/api/pos/label-queue?${params}`)
 }
