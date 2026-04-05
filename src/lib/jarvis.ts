@@ -723,13 +723,19 @@ export async function createPromo(promo: CreatePromoRequest): Promise<CreateProm
 // ── Print Label ──────────────────────────────────────────────────────────────
 
 export interface PrintLabelResponse {
-  success: boolean
+  ok: boolean
   barcode: string
-  queued?: boolean
+  description?: string
+  price?: number
+  labelCount?: number
+  printerId?: number
+  styleId?: number
   message?: string
-  jobId?: string
+  batchId?: string
+  error?: string
 }
 
+/** Step 1: Queue labels via SmartRetail API (POST /smartservice/shelflabel) */
 export async function printLabel(barcode: string, qty = 1, printerId?: number, styleId?: number): Promise<PrintLabelResponse> {
   const body: Record<string, unknown> = { barcode, qty }
   if (printerId != null) body.printerId = printerId
@@ -738,6 +744,23 @@ export async function printLabel(barcode: string, qty = 1, printerId?: number, s
     '/api/pos-actions/print-label',
     'POST',
     body,
+  )
+}
+
+export interface GenerateLabelResponse {
+  ok: boolean
+  generated: number
+  printed: boolean
+  message?: string
+  error?: string
+}
+
+/** Step 2: Generate rendered labels and send to printer via Playwright browser session */
+export async function generateAndPrintLabels(printerId: number, styleId: number): Promise<GenerateLabelResponse> {
+  return jarvisMutate<GenerateLabelResponse>(
+    '/api/pos/label-queue/generate',
+    'POST',
+    { printerId, styleId },
   )
 }
 

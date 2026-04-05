@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Search, ScanBarcode, X, Printer, Loader2, Check, Trash2, Plus, Minus, AlertCircle, ChevronDown, RefreshCw } from 'lucide-react'
 import { db } from '../lib/db'
-import { searchItems, printLabel, getPrinters, getLabelStyles, getPrintStatus, type PrinterInfo, type LabelStyle, type PrintQueueStatus } from '../lib/jarvis'
+import { searchItems, printLabel, generateAndPrintLabels, getPrinters, getLabelStyles, getPrintStatus, type PrinterInfo, type LabelStyle, type PrintQueueStatus } from '../lib/jarvis'
 import BarcodeScanner from './BarcodeScanner'
 
 interface PrintItem {
@@ -42,6 +42,7 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   const [selectedStyle, setSelectedStyle] = useState<number | null>(null)
   const [configLoading, setConfigLoading] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
+  const [generateResult, setGenerateResult] = useState<{ ok: boolean; generated: number; printed: boolean; message?: string } | null>(null)
 
   // Print status polling
   const [printStatus, setPrintStatus] = useState<PrintQueueStatus[]>([])
@@ -157,7 +158,7 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
     if (!open) {
       setQuery(''); setResults([]); setQueue([]); setPrintResults([]); setDone(false)
       setSelectedPrinter(null); setSelectedStyle(null); setPrinters([]); setLabelStyles([]); setConfigError(null)
-      setPrintStatus([]); if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
+      setPrintStatus([]); setGenerateResult(null); if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
     }
   }, [open])
 
@@ -187,6 +188,9 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   async function handleSubmit() {
     setSubmitting(true)
     setPrintResults([])
+    setGenerateResult(null)
+
+    // Step 1: Queue all labels via SmartRetail API
     const results: PrintResult[] = []
     for (const item of queue) {
       try {
@@ -197,6 +201,18 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
       }
     }
     setPrintResults(results)
+
+    // Step 2: Generate rendered labels and send to printer
+    const queued = results.some(r => r.success)
+    if (queued && selectedPrinter != null && selectedStyle != null) {
+      try {
+        const genRes = await generateAndPrintLabels(selectedPrinter, selectedStyle)
+        setGenerateResult({ ok: genRes.ok, generated: genRes.generated, printed: genRes.printed, message: genRes.message })
+      } catch (err) {
+        setGenerateResult({ ok: false, generated: 0, printed: false, message: err instanceof Error ? err.message : 'Generate failed' })
+      }
+    }
+
     setSubmitting(false)
     setDone(true)
   }
@@ -280,6 +296,23 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
                 )}
               </div>
             </div>
+
+            {/* Generate & print status */}
+            {generateResult && (
+              <div className={`flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm ${generateResult.ok ? 'bg-emerald-50' : 'bg-red-50'}`}>
+                {generateResult.ok ? <Check size={14} className="text-emerald-600 shrink-0" /> : <AlertCircle size={14} className="text-red-600 shrink-0" />}
+                <div className="min-w-0 flex-1">
+                  <p className={`text-xs font-medium ${generateResult.ok ? 'text-emerald-700' : 'text-red-700'}`}>
+                    {generateResult.ok
+                      ? `${generateResult.generated} label${generateResult.generated !== 1 ? 's' : ''} generated${generateResult.printed ? ' & sent to printer' : ''}`
+                      : 'Label generation failed'}
+                  </p>
+                  {generateResult.message && (
+                    <p className={`text-[10px] mt-0.5 ${generateResult.ok ? 'text-emerald-600' : 'text-red-600'}`}>{generateResult.message}</p>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Per-item results */}
             <div className="space-y-1.5">
