@@ -730,9 +730,10 @@ export interface PrintLabelResponse {
   jobId?: string
 }
 
-export async function printLabel(barcode: string, qty = 1, printerId?: string): Promise<PrintLabelResponse> {
+export async function printLabel(barcode: string, qty = 1, printerId?: number, styleId?: number): Promise<PrintLabelResponse> {
   const body: Record<string, unknown> = { barcode, qty }
-  if (printerId) body.printerId = printerId
+  if (printerId != null) body.printerId = printerId
+  if (styleId != null) body.styleId = styleId
   return jarvisMutate<PrintLabelResponse>(
     '/api/pos-actions/print-label',
     'POST',
@@ -740,7 +741,7 @@ export async function printLabel(barcode: string, qty = 1, printerId?: string): 
   )
 }
 
-// ── Printers ─────────────────────────────────────────────────────────────────
+// ── Printers, Stationery & Label Styles ─────────────────────────────────────
 
 export interface PrinterInfo {
   id: number
@@ -750,10 +751,32 @@ export interface PrinterInfo {
   isReport: boolean
   queueId: string
   queueRunning: boolean
+  defaultStyleId: number | null
+}
+
+export interface StationeryInfo {
+  id: number
+  name: string
+  labelsPerPage: number
+  paperSize: string
+}
+
+export interface LabelStyle {
+  id: number
+  name: string
+  printerId: number
 }
 
 export async function getPrinters(): Promise<PrinterInfo[]> {
   return jarvisFetch<PrinterInfo[]>('/api/pos/printers')
+}
+
+export async function getStationery(): Promise<StationeryInfo[]> {
+  return jarvisFetch<StationeryInfo[]>('/api/pos/stationery')
+}
+
+export async function getLabelStyles(): Promise<LabelStyle[]> {
+  return jarvisFetch<LabelStyle[]>('/api/pos/label-styles')
 }
 
 // ── Price Lock ───────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, ScanBarcode, X, Printer, Loader2, Check, Trash2, Plus, Minus, AlertCircle, ChevronDown } from 'lucide-react'
 import { db } from '../lib/db'
-import { searchItems, printLabel, getPrinters, type PrinterInfo } from '../lib/jarvis'
+import { searchItems, printLabel, getPrinters, getLabelStyles, type PrinterInfo, type LabelStyle } from '../lib/jarvis'
 import BarcodeScanner from './BarcodeScanner'
 
 interface PrintItem {
@@ -35,33 +35,61 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   const [printResults, setPrintResults] = useState<PrintResult[]>([])
   const [done, setDone] = useState(false)
 
-  // Printer state
+  // Printer & label style state
   const [printers, setPrinters] = useState<PrinterInfo[]>([])
-  const [selectedPrinter, setSelectedPrinter] = useState('')
-  const [printersLoading, setPrintersLoading] = useState(false)
-  const [printersError, setPrintersError] = useState<string | null>(null)
+  const [labelStyles, setLabelStyles] = useState<LabelStyle[]>([])
+  const [selectedPrinter, setSelectedPrinter] = useState<number | null>(null)
+  const [selectedStyle, setSelectedStyle] = useState<number | null>(null)
+  const [configLoading, setConfigLoading] = useState(false)
+  const [configError, setConfigError] = useState<string | null>(null)
 
-  // Load printers when sheet opens
+  // Load printers and label styles when sheet opens
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    setPrintersLoading(true)
-    setPrintersError(null)
-    getPrinters()
-      .then(data => {
+    setConfigLoading(true)
+    setConfigError(null)
+    Promise.allSettled([getPrinters(), getLabelStyles()])
+      .then(([printersRes, stylesRes]) => {
         if (cancelled) return
-        const list = Array.isArray(data) ? data : []
-        setPrinters(list)
-        // Default to the first label printer
-        const labelPrinter = list.find(p => p.isLabel) || list[0]
-        if (labelPrinter) setSelectedPrinter(String(labelPrinter.id))
+        const printerList = printersRes.status === 'fulfilled' && Array.isArray(printersRes.value) ? printersRes.value : []
+        const styleList = stylesRes.status === 'fulfilled' && Array.isArray(stylesRes.value) ? stylesRes.value : []
+        setPrinters(printerList)
+        setLabelStyles(styleList)
+
+        if (printerList.length === 0 && styleList.length === 0) {
+          setConfigError('Could not load printers')
+          return
+        }
+
+        // Default to first label printer
+        const labelPrinter = printerList.find(p => p.isLabel) || printerList[0]
+        if (labelPrinter) {
+          setSelectedPrinter(labelPrinter.id)
+          // Auto-select the printer's default style
+          if (labelPrinter.defaultStyleId) {
+            setSelectedStyle(labelPrinter.defaultStyleId)
+          } else {
+            const printerStyle = styleList.find(s => s.printerId === labelPrinter.id)
+            if (printerStyle) setSelectedStyle(printerStyle.id)
+          }
+        }
       })
-      .catch(() => {
-        if (!cancelled) setPrintersError('Could not load printers')
-      })
-      .finally(() => { if (!cancelled) setPrintersLoading(false) })
+      .finally(() => { if (!cancelled) setConfigLoading(false) })
     return () => { cancelled = true }
   }, [open])
+
+  // When printer changes, auto-select matching style
+  function handlePrinterChange(printerId: number) {
+    setSelectedPrinter(printerId)
+    const printer = printers.find(p => p.id === printerId)
+    if (printer?.defaultStyleId) {
+      setSelectedStyle(printer.defaultStyleId)
+    } else {
+      const match = labelStyles.find(s => s.printerId === printerId)
+      setSelectedStyle(match?.id ?? null)
+    }
+  }
 
   const doSearch = useCallback(async (q: string) => {
     const trimmed = q.trim()
@@ -95,7 +123,7 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   useEffect(() => {
     if (!open) {
       setQuery(''); setResults([]); setQueue([]); setPrintResults([]); setDone(false)
-      setSelectedPrinter(''); setPrinters([]); setPrintersError(null)
+      setSelectedPrinter(null); setSelectedStyle(null); setPrinters([]); setLabelStyles([]); setConfigError(null)
     }
   }, [open])
 
@@ -126,10 +154,9 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
     setSubmitting(true)
     setPrintResults([])
     const results: PrintResult[] = []
-    const printer = selectedPrinter || undefined
     for (const item of queue) {
       try {
-        await printLabel(item.barcode, item.qty, printer)
+        await printLabel(item.barcode, item.qty, selectedPrinter ?? undefined, selectedStyle ?? undefined)
         results.push({ barcode: item.barcode, name: item.name, qty: item.qty, success: true })
       } catch (err) {
         results.push({ barcode: item.barcode, name: item.name, qty: item.qty, success: false, error: err instanceof Error ? err.message : 'Failed' })
@@ -146,8 +173,13 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   const successCount = printResults.filter(r => r.success).length
   const totalPrinted = printResults.filter(r => r.success).reduce((s, r) => s + r.qty, 0)
   const totalFailed = printResults.filter(r => !r.success).reduce((s, r) => s + r.qty, 0)
-  const selectedPrinterObj = printers.find(p => String(p.id) === selectedPrinter)
-  const selectedPrinterName = selectedPrinterObj?.name || ''
+  const selectedPrinterName = printers.find(p => p.id === selectedPrinter)?.name || ''
+  const selectedStyleName = labelStyles.find(s => s.id === selectedStyle)?.name || ''
+
+  // Label styles filtered to selected printer
+  const filteredStyles = selectedPrinter != null
+    ? labelStyles.filter(s => s.printerId === selectedPrinter)
+    : labelStyles
 
   return (
     <>
@@ -204,6 +236,12 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
                   <div>
                     <p className="text-[10px] text-gray-400">Printer</p>
                     <p className="text-sm font-medium text-gray-900 truncate">{selectedPrinterName}</p>
+                  </div>
+                )}
+                {selectedStyleName && (
+                  <div>
+                    <p className="text-[10px] text-gray-400">Label Style</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">{selectedStyleName}</p>
                   </div>
                 )}
               </div>
@@ -284,37 +322,57 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
               )}
             </div>
 
-            {/* Printer & Format selection + Submit */}
+            {/* Printer & Style selection + Submit */}
             {queue.length > 0 && (
               <div className="px-4 py-3 border-t border-gray-100 shrink-0 space-y-3">
-                {/* Printer / Format selectors */}
-                {printersLoading ? (
+                {configLoading ? (
                   <div className="flex items-center gap-2 text-xs text-gray-400">
                     <Loader2 size={12} className="animate-spin" />
                     Loading printers...
                   </div>
-                ) : printersError ? (
+                ) : configError ? (
                   <div className="flex items-center gap-2 text-xs text-amber-600">
                     <AlertCircle size={12} />
-                    <span>{printersError} — will use default</span>
+                    <span>{configError} — will use default</span>
                   </div>
-                ) : printers.length > 0 ? (
-                  <div>
-                    <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Printer</label>
-                    <div className="relative mt-0.5">
-                      <select
-                        value={selectedPrinter}
-                        onChange={e => setSelectedPrinter(e.target.value)}
-                        className="w-full appearance-none border border-gray-200 rounded-lg px-2.5 py-1.5 pr-7 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                      >
-                        {printers.map(p => (
-                          <option key={p.id} value={String(p.id)}>
-                            {p.name}{!p.queueRunning ? ' (offline)' : ''}
-                          </option>
-                        ))}
-                      </select>
-                      <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                    </div>
+                ) : (printers.length > 0 || labelStyles.length > 0) ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {printers.length > 0 && (
+                      <div>
+                        <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Printer</label>
+                        <div className="relative mt-0.5">
+                          <select
+                            value={selectedPrinter ?? ''}
+                            onChange={e => handlePrinterChange(Number(e.target.value))}
+                            className="w-full appearance-none border border-gray-200 rounded-lg px-2.5 py-1.5 pr-7 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                          >
+                            {printers.map(p => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}{!p.queueRunning ? ' (offline)' : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                      </div>
+                    )}
+                    {filteredStyles.length > 0 && (
+                      <div>
+                        <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Label Style</label>
+                        <div className="relative mt-0.5">
+                          <select
+                            value={selectedStyle ?? ''}
+                            onChange={e => setSelectedStyle(Number(e.target.value))}
+                            className="w-full appearance-none border border-gray-200 rounded-lg px-2.5 py-1.5 pr-7 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                          >
+                            {filteredStyles.map(s => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                            ))}
+                          </select>
+                          <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : null}
 
