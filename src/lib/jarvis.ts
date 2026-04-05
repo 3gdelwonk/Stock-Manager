@@ -756,12 +756,49 @@ export interface GenerateLabelResponse {
 }
 
 /** Step 2: Generate rendered labels and send to printer via Playwright browser session */
-export async function generateAndPrintLabels(printerId: number, styleId: number): Promise<GenerateLabelResponse> {
+export async function generateAndPrintLabels(printerId: number, styleId?: number): Promise<GenerateLabelResponse> {
+  const body: Record<string, unknown> = { type: 'label', printerId }
+  if (styleId != null) body.styleId = styleId
   return jarvisMutate<GenerateLabelResponse>(
     '/api/pos/label-queue/generate',
     'POST',
-    { printerId, styleId },
+    body,
   )
+}
+
+// ── Label Queue Management ──────────────────────────────────────────────────
+
+export interface LabelQueueItem {
+  barcode: string
+  itemCode: string
+  description: string
+  sellPrice: number
+  normalPrice: number
+  count: number
+  printerId: number
+  batchId: string
+  createdBy: string
+  createdAt: string
+}
+
+export interface LabelQueueResponse {
+  type: string
+  pending: number
+  items: LabelQueueItem[]
+}
+
+export async function getLabelQueue(printerId?: number): Promise<LabelQueueResponse> {
+  const params = new URLSearchParams({ type: 'label' })
+  if (printerId != null) params.set('printerId', String(printerId))
+  return jarvisFetch<LabelQueueResponse>(`/api/pos/label-queue?${params}`)
+}
+
+export async function removeFromLabelQueue(barcodes: string[]): Promise<{ ok: boolean }> {
+  return jarvisMutate<{ ok: boolean }>('/api/pos/label-queue/remove', 'POST', { barcodes })
+}
+
+export async function markLabelsPrinted(barcodes: string[]): Promise<{ ok: boolean }> {
+  return jarvisMutate<{ ok: boolean }>('/api/pos/label-queue/mark-printed', 'POST', { barcodes })
 }
 
 // ── Printers, Stationery & Label Styles ─────────────────────────────────────
