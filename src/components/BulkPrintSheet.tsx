@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Search, ScanBarcode, X, Printer, Loader2, Check, Trash2, Plus, Minus, AlertCircle, ChevronDown } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Search, ScanBarcode, X, Printer, Loader2, Check, Trash2, Plus, Minus, AlertCircle, ChevronDown, RefreshCw } from 'lucide-react'
 import { db } from '../lib/db'
-import { searchItems, printLabel, getPrinters, getLabelStyles, type PrinterInfo, type LabelStyle } from '../lib/jarvis'
+import { searchItems, printLabel, getPrinters, getLabelStyles, getPrintStatus, type PrinterInfo, type LabelStyle, type PrintQueueStatus } from '../lib/jarvis'
 import BarcodeScanner from './BarcodeScanner'
 
 interface PrintItem {
@@ -43,6 +43,11 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   const [configLoading, setConfigLoading] = useState(false)
   const [configError, setConfigError] = useState<string | null>(null)
 
+  // Print status polling
+  const [printStatus, setPrintStatus] = useState<PrintQueueStatus[]>([])
+  const [statusLoading, setStatusLoading] = useState(false)
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   // Load printers and label styles when sheet opens
   useEffect(() => {
     if (!open) return
@@ -78,6 +83,34 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
       .finally(() => { if (!cancelled) setConfigLoading(false) })
     return () => { cancelled = true }
   }, [open])
+
+  // Poll print status when done
+  const fetchPrintStatus = useCallback(async () => {
+    setStatusLoading(true)
+    try {
+      const res = await getPrintStatus()
+      if (Array.isArray(res?.printers)) setPrintStatus(res.printers)
+    } catch { /* non-fatal */ }
+    setStatusLoading(false)
+  }, [])
+
+  useEffect(() => {
+    if (!done) {
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
+      setPrintStatus([])
+      return
+    }
+    // Initial fetch + poll every 5s
+    fetchPrintStatus()
+    function poll() {
+      statusTimerRef.current = setTimeout(async () => {
+        await fetchPrintStatus()
+        poll()
+      }, 5000)
+    }
+    poll()
+    return () => { if (statusTimerRef.current) clearTimeout(statusTimerRef.current) }
+  }, [done, fetchPrintStatus])
 
   // When printer changes, auto-select matching style
   function handlePrinterChange(printerId: number) {
@@ -124,6 +157,7 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
     if (!open) {
       setQuery(''); setResults([]); setQueue([]); setPrintResults([]); setDone(false)
       setSelectedPrinter(null); setSelectedStyle(null); setPrinters([]); setLabelStyles([]); setConfigError(null)
+      setPrintStatus([]); if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
     }
   }, [open])
 
@@ -261,6 +295,55 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
                 </div>
               ))}
             </div>
+
+            {/* Live print queue status */}
+            {printStatus.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Printer Queues</p>
+                  {statusLoading && <Loader2 size={10} className="animate-spin text-gray-400" />}
+                  {!statusLoading && (
+                    <button onClick={fetchPrintStatus} className="p-0.5 text-gray-400 hover:text-gray-600">
+                      <RefreshCw size={10} />
+                    </button>
+                  )}
+                </div>
+                {printStatus.map(pq => {
+                  const progress = pq.labels.total > 0 ? Math.round((pq.labels.printed / pq.labels.total) * 100) : 0
+                  const hasPending = pq.labels.pending > 0
+                  return (
+                    <div key={pq.queueId} className="bg-gray-50 rounded-lg px-3 py-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <div className={`w-1.5 h-1.5 rounded-full ${pq.status === 'running' ? 'bg-emerald-500' : 'bg-red-400'}`} />
+                          <span className="text-xs font-medium text-gray-900">{pq.name.replace(/^Print:\s*/, '')}</span>
+                        </div>
+                        <span className="text-[10px] text-gray-400">{pq.status}</span>
+                      </div>
+                      {pq.labels.total > 0 && (
+                        <>
+                          <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-500 ${hasPending ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                              style={{ width: `${progress}%` }}
+                            />
+                          </div>
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="text-gray-500">{pq.labels.printed}/{pq.labels.total} printed</span>
+                            {hasPending && <span className="text-amber-600 font-medium">{pq.labels.pending} pending</span>}
+                          </div>
+                        </>
+                      )}
+                      {pq.lastError && (
+                        <p className="text-[10px] text-red-500 truncate">
+                          Last error: {new Date(pq.lastError).toLocaleTimeString()}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
 
             <button onClick={onClose} className="w-full py-2.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg mt-2">Done</button>
           </div>

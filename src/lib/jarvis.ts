@@ -779,6 +779,36 @@ export async function getLabelStyles(): Promise<LabelStyle[]> {
   return jarvisFetch<LabelStyle[]>('/api/pos/label-styles')
 }
 
+// ── Print Status ─────────────────────────────────────────────────────────────
+
+export interface PrintQueueLabels {
+  pending: number
+  printed: number
+  total: number
+  latestQueued: string | null
+  latestPrinted: string | null
+}
+
+export interface PrintQueueStatus {
+  queueId: string
+  name: string
+  printerId: number
+  status: string
+  lastJobId: string | null
+  lastError: string | null
+  labels: PrintQueueLabels
+}
+
+export interface PrintStatusResponse {
+  printers: PrintQueueStatus[]
+  talkers: { pending: number; printed: number; total: number }
+  unassigned: { pending: number; total: number }
+}
+
+export async function getPrintStatus(): Promise<PrintStatusResponse> {
+  return jarvisFetch<PrintStatusResponse>('/api/pos/print-status')
+}
+
 // ── Price Lock ───────────────────────────────────────────────────────────────
 
 export interface PriceLockResponse {
