@@ -87,7 +87,7 @@ export default function App() {
     // Migrate old tab names
     if (saved === 'products' as string || saved === 'promos' as string) return 'stock'
     if (saved === 'performance' as string) return 'track'
-    return saved && TABS.some(t => t.id === saved) ? saved : 'dashboard'
+    return saved && TABS.some(t => t.id === saved) ? saved as Tab : 'dashboard'
   })
   const [showSettings, setShowSettings] = useState(false)
   const [showConnHistory, setShowConnHistory] = useState(false)
