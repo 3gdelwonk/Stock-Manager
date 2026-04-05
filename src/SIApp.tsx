@@ -10,6 +10,7 @@ import InsightsPlaceholder from './components/si/InsightsPlaceholder'
 import GmailScoutPlaceholder from './components/si/GmailScoutPlaceholder'
 import AuditView from './components/si/AuditView'
 import CustomerManager from './components/si/CustomerManager'
+import PriceLocksView from './components/si/PriceLocksView'
 
 const STORAGE_KEY = 'si-app-last-view'
 
@@ -21,6 +22,7 @@ const VIEW_TITLES: Record<SIView, string> = {
   gmail: 'Gmail Scout',
   audit: 'Audit Trail',
   customers: 'Customer Manager',
+  'price-locks': 'Price Locks',
 }
 
 function getView(): SIView {
@@ -75,6 +77,7 @@ export default function SIApp() {
       case 'gmail': return <GmailScoutPlaceholder />
       case 'audit': return <AuditView />
       case 'customers': return <CustomerManager />
+      case 'price-locks': return <PriceLocksView />
     }
   })()
 

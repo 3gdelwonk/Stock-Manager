@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { X, Check, AlertCircle, Send, Tag } from 'lucide-react'
-import { changeAndSend, updateBackOfficePrice, printLabel } from '../lib/jarvis'
+import { X, Check, AlertCircle, Send, Tag, Lock } from 'lucide-react'
+import { changeAndSend, updateBackOfficePrice, printLabel, setPriceLock } from '../lib/jarvis'
 import { db } from '../lib/db'
 import { PRICE_CHANGE_REASONS } from '../lib/constants'
 import type { TrackedItem } from '../lib/types'
@@ -35,6 +35,7 @@ export default function PriceChangeModal({
   const [notes, setNotes] = useState('')
   const [sendToPos, setSendToPos] = useState(true)
   const [doPrintLabel, setDoPrintLabel] = useState(false)
+  const [doLockPrice, setDoLockPrice] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<'success' | 'error' | null>(null)
   const [errorMsg, setErrorMsg] = useState('')
@@ -87,6 +88,15 @@ export default function PriceChangeModal({
         }
       }
 
+      // 2c. Lock price if requested
+      if (doLockPrice) {
+        try {
+          await setPriceLock(effectiveBarcode, true)
+        } catch {
+          // Non-fatal — price change succeeded, lock is best-effort
+        }
+      }
+
       // 3. On success: update TrackedItem
       await db.trackedItems.update(trackedId, {
         syncStatus: 'synced',
@@ -94,10 +104,10 @@ export default function PriceChangeModal({
         currentPrice: price,
       })
 
-      const msg = sendToPos
-        ? 'Price updated + sent to registers'
-        : 'Price updated (back-office only)'
-      setSuccessMsg(doPrintLabel ? `${msg} · Label queued` : msg)
+      const parts = [sendToPos ? 'Price updated + sent to registers' : 'Price updated (back-office only)']
+      if (doPrintLabel) parts.push('Label queued')
+      if (doLockPrice) parts.push('Price locked')
+      setSuccessMsg(parts.join(' · '))
       setResult('success')
 
       // 6. Close after 1.5 seconds on success
@@ -217,6 +227,16 @@ export default function PriceChangeModal({
             />
             <Tag size={14} className="text-gray-400" />
             Print shelf label
+          </label>
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={doLockPrice}
+              onChange={(e) => setDoLockPrice(e.target.checked)}
+              className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <Lock size={14} className="text-gray-400" />
+            Lock price against host updates
           </label>
         </div>
 

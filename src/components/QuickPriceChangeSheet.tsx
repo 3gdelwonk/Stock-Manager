@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, ScanBarcode, X, DollarSign, Loader2, Check, Trash2, Send, Tag, AlertCircle } from 'lucide-react'
+import { Search, ScanBarcode, X, DollarSign, Loader2, Check, Trash2, Send, Tag, AlertCircle, Lock } from 'lucide-react'
 import { db } from '../lib/db'
-import { searchItems, changeAndSend, printLabel } from '../lib/jarvis'
+import { searchItems, changeAndSend, printLabel, setPriceLock } from '../lib/jarvis'
 import BarcodeScanner from './BarcodeScanner'
 import { DEPARTMENT_LABELS } from '../lib/constants'
 
@@ -39,6 +39,7 @@ export default function QuickPriceChangeSheet({ open, onClose }: QuickPriceChang
   // Queue for bulk price changes
   const [queue, setQueue] = useState<QueueItem[]>([])
   const [doPrintLabels, setDoPrintLabels] = useState(false)
+  const [doLockPrices, setDoLockPrices] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [changeResults, setChangeResults] = useState<ChangeResult[]>([])
   const [done, setDone] = useState(false)
@@ -74,7 +75,7 @@ export default function QuickPriceChangeSheet({ open, onClose }: QuickPriceChang
   }, [query, open, doSearch])
 
   useEffect(() => {
-    if (!open) { setQuery(''); setResults([]); setQueue([]); setChangeResults([]); setDone(false); setDoPrintLabels(false) }
+    if (!open) { setQuery(''); setResults([]); setQueue([]); setChangeResults([]); setDone(false); setDoPrintLabels(false); setDoLockPrices(false) }
   }, [open])
 
   function handleScan(code: string) {
@@ -125,6 +126,10 @@ export default function QuickPriceChangeSheet({ open, onClose }: QuickPriceChang
           try { await printLabel(effectiveBarcode) } catch { /* non-fatal */ }
         }
 
+        if (doLockPrices) {
+          try { await setPriceLock(effectiveBarcode, true) } catch { /* non-fatal */ }
+        }
+
         results.push({ barcode: item.barcode, name: item.name, success: true })
       } catch (err) {
         results.push({ barcode: item.barcode, name: item.name, success: false, error: err instanceof Error ? err.message : 'Failed' })
@@ -173,6 +178,9 @@ export default function QuickPriceChangeSheet({ open, onClose }: QuickPriceChang
               </p>
               {doPrintLabels && successCount > 0 && (
                 <p className="text-xs text-gray-500 mt-1">Labels sent to printer</p>
+              )}
+              {doLockPrices && successCount > 0 && (
+                <p className="text-xs text-gray-500 mt-0.5">Prices locked against host updates</p>
               )}
             </div>
             {changeResults.map(r => (
@@ -267,6 +275,12 @@ export default function QuickPriceChangeSheet({ open, onClose }: QuickPriceChang
                     className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />
                   <Tag size={14} className="text-gray-400" />
                   Print shelf labels after update
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input type="checkbox" checked={doLockPrices} onChange={e => setDoLockPrices(e.target.checked)}
+                    className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" />
+                  <Lock size={14} className="text-gray-400" />
+                  Lock prices against host updates
                 </label>
                 <button onClick={handleSubmitAll} disabled={submitting || validCount === 0}
                   className="w-full py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 flex items-center justify-center gap-2">

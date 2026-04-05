@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, ScanBarcode, X, Printer, Loader2, Check, Trash2, Plus, Minus } from 'lucide-react'
+import { Search, ScanBarcode, X, Printer, Loader2, Check, Trash2, Plus, Minus, AlertCircle, ChevronDown } from 'lucide-react'
 import { db } from '../lib/db'
-import { searchItems, printLabel } from '../lib/jarvis'
+import { searchItems, printLabel, getPrinters, getLabelFormats, type PrinterInfo, type LabelFormat } from '../lib/jarvis'
 import BarcodeScanner from './BarcodeScanner'
 
 interface PrintItem {
@@ -14,6 +14,8 @@ interface PrintItem {
 
 interface PrintResult {
   barcode: string
+  name: string
+  qty: number
   success: boolean
   error?: string
 }
@@ -32,6 +34,37 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   const [submitting, setSubmitting] = useState(false)
   const [printResults, setPrintResults] = useState<PrintResult[]>([])
   const [done, setDone] = useState(false)
+
+  // Printer & format state
+  const [printers, setPrinters] = useState<PrinterInfo[]>([])
+  const [formats, setFormats] = useState<LabelFormat[]>([])
+  const [selectedPrinter, setSelectedPrinter] = useState('')
+  const [selectedFormat, setSelectedFormat] = useState('')
+  const [printersLoading, setPrintersLoading] = useState(false)
+  const [printersError, setPrintersError] = useState<string | null>(null)
+
+  // Load printers and formats when sheet opens
+  useEffect(() => {
+    if (!open) return
+    setPrintersLoading(true)
+    setPrintersError(null)
+    Promise.allSettled([getPrinters(), getLabelFormats()])
+      .then(([printersRes, formatsRes]) => {
+        if (printersRes.status === 'fulfilled') {
+          setPrinters(printersRes.value.printers)
+          const def = printersRes.value.printers.find(p => p.isDefault)
+          if (def) setSelectedPrinter(def.id)
+          else if (printersRes.value.printers.length > 0) setSelectedPrinter(printersRes.value.printers[0].id)
+        } else {
+          setPrintersError('Could not load printers')
+        }
+        if (formatsRes.status === 'fulfilled') {
+          setFormats(formatsRes.value.formats)
+          if (formatsRes.value.formats.length > 0) setSelectedFormat(formatsRes.value.formats[0].id)
+        }
+      })
+      .finally(() => setPrintersLoading(false))
+  }, [open])
 
   const doSearch = useCallback(async (q: string) => {
     const trimmed = q.trim()
@@ -63,7 +96,10 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
   }, [query, open, doSearch])
 
   useEffect(() => {
-    if (!open) { setQuery(''); setResults([]); setQueue([]); setPrintResults([]); setDone(false) }
+    if (!open) {
+      setQuery(''); setResults([]); setQueue([]); setPrintResults([]); setDone(false)
+      setSelectedPrinter(''); setSelectedFormat(''); setPrinters([]); setFormats([])
+    }
   }, [open])
 
   function addToQueue(item: PrintItem) {
@@ -93,12 +129,14 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
     setSubmitting(true)
     setPrintResults([])
     const results: PrintResult[] = []
+    const printer = selectedPrinter || undefined
+    const format = selectedFormat || undefined
     for (const item of queue) {
       try {
-        await printLabel(item.barcode, item.qty)
-        results.push({ barcode: item.barcode, success: true })
+        await printLabel(item.barcode, item.qty, printer, format)
+        results.push({ barcode: item.barcode, name: item.name, qty: item.qty, success: true })
       } catch (err) {
-        results.push({ barcode: item.barcode, success: false, error: err instanceof Error ? err.message : 'Failed' })
+        results.push({ barcode: item.barcode, name: item.name, qty: item.qty, success: false, error: err instanceof Error ? err.message : 'Failed' })
       }
     }
     setPrintResults(results)
@@ -110,6 +148,10 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
 
   const totalLabels = queue.reduce((s, i) => s + i.qty, 0)
   const successCount = printResults.filter(r => r.success).length
+  const totalPrinted = printResults.filter(r => r.success).reduce((s, r) => s + r.qty, 0)
+  const totalFailed = printResults.filter(r => !r.success).reduce((s, r) => s + r.qty, 0)
+  const selectedPrinterName = printers.find(p => p.id === selectedPrinter)?.name || selectedPrinter
+  const selectedFormatName = formats.find(f => f.id === selectedFormat)?.name || selectedFormat
 
   return (
     <>
@@ -133,27 +175,65 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
         </div>
 
         {done ? (
-          /* Results view */
+          /* ── Job Summary ── */
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
             <div className="flex flex-col items-center py-4">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 ${successCount === queue.length ? 'bg-emerald-100' : 'bg-amber-100'}`}>
-                {successCount === queue.length ? <Check size={24} className="text-emerald-600" /> : <Printer size={24} className="text-amber-600" />}
+                {successCount === queue.length ? <Check size={24} className="text-emerald-600" /> : <AlertCircle size={24} className="text-amber-600" />}
               </div>
               <p className="text-sm font-semibold text-gray-900">
-                {successCount === queue.length ? 'All labels sent to printer' : `${successCount}/${queue.length} labels sent`}
+                {successCount === queue.length ? 'All labels sent to printer' : `${successCount}/${queue.length} items sent`}
               </p>
             </div>
-            {printResults.map(r => {
-              const item = queue.find(q => q.barcode === r.barcode)
-              return (
+
+            {/* Summary card */}
+            <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Print Job Summary</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-[10px] text-gray-400">Products</p>
+                  <p className="text-sm font-bold text-gray-900">{queue.length}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-gray-400">Labels Printed</p>
+                  <p className="text-sm font-bold text-emerald-600">{totalPrinted}</p>
+                </div>
+                {totalFailed > 0 && (
+                  <div>
+                    <p className="text-[10px] text-gray-400">Labels Failed</p>
+                    <p className="text-sm font-bold text-red-600">{totalFailed}</p>
+                  </div>
+                )}
+                {selectedPrinterName && (
+                  <div>
+                    <p className="text-[10px] text-gray-400">Printer</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">{selectedPrinterName}</p>
+                  </div>
+                )}
+                {selectedFormatName && (
+                  <div>
+                    <p className="text-[10px] text-gray-400">Format</p>
+                    <p className="text-sm font-medium text-gray-900 truncate">{selectedFormatName}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Per-item results */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Items</p>
+              {printResults.map(r => (
                 <div key={r.barcode} className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm ${r.success ? 'bg-emerald-50' : 'bg-red-50'}`}>
-                  <span className={r.success ? 'text-emerald-700' : 'text-red-700'}>{item?.name || r.barcode}</span>
-                  <span className={`text-xs font-medium ${r.success ? 'text-emerald-600' : 'text-red-600'}`}>
-                    {r.success ? 'Sent' : r.error}
+                  <div className="min-w-0 flex-1">
+                    <span className={`truncate ${r.success ? 'text-emerald-700' : 'text-red-700'}`}>{r.name}</span>
+                  </div>
+                  <span className={`text-xs font-medium shrink-0 ml-2 ${r.success ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {r.success ? `${r.qty} label${r.qty > 1 ? 's' : ''} sent` : r.error}
                   </span>
                 </div>
-              )
-            })}
+              ))}
+            </div>
+
             <button onClick={onClose} className="w-full py-2.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg mt-2">Done</button>
           </div>
         ) : (
@@ -214,9 +294,66 @@ export default function BulkPrintSheet({ open, onClose }: BulkPrintSheetProps) {
               )}
             </div>
 
-            {/* Submit */}
+            {/* Printer & Format selection + Submit */}
             {queue.length > 0 && (
-              <div className="px-4 py-3 border-t border-gray-100 shrink-0">
+              <div className="px-4 py-3 border-t border-gray-100 shrink-0 space-y-3">
+                {/* Printer / Format selectors */}
+                {printersLoading ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-400">
+                    <Loader2 size={12} className="animate-spin" />
+                    Loading printers...
+                  </div>
+                ) : printersError ? (
+                  <div className="flex items-center gap-2 text-xs text-amber-600">
+                    <AlertCircle size={12} />
+                    <span>{printersError} — will use default</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* Printer select */}
+                    {printers.length > 0 && (
+                      <div>
+                        <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Printer</label>
+                        <div className="relative mt-0.5">
+                          <select
+                            value={selectedPrinter}
+                            onChange={e => setSelectedPrinter(e.target.value)}
+                            className="w-full appearance-none border border-gray-200 rounded-lg px-2.5 py-1.5 pr-7 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                          >
+                            {printers.map(p => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}{p.isDefault ? ' (default)' : ''}{p.status !== 'ready' && p.status !== 'online' ? ` — ${p.status}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Format select */}
+                    {formats.length > 0 && (
+                      <div>
+                        <label className="text-[10px] font-medium text-gray-500 uppercase tracking-wider">Label Format</label>
+                        <div className="relative mt-0.5">
+                          <select
+                            value={selectedFormat}
+                            onChange={e => setSelectedFormat(e.target.value)}
+                            className="w-full appearance-none border border-gray-200 rounded-lg px-2.5 py-1.5 pr-7 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                          >
+                            {formats.map(f => (
+                              <option key={f.id} value={f.id}>
+                                {f.name}{f.description ? ` — ${f.description}` : ''}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <button onClick={handleSubmit} disabled={submitting}
                   className="w-full py-2.5 bg-emerald-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 flex items-center justify-center gap-2">
                   {submitting ? <><Loader2 size={16} className="animate-spin" /> Printing {totalLabels} labels...</> : <><Printer size={16} /> Print {totalLabels} Labels</>}

@@ -727,14 +727,94 @@ export interface PrintLabelResponse {
   barcode: string
   queued?: boolean
   message?: string
+  jobId?: string
 }
 
-export async function printLabel(barcode: string, qty = 1): Promise<PrintLabelResponse> {
+export interface PrintLabelOptions {
+  barcode: string
+  qty?: number
+  printer?: string
+  format?: string
+}
+
+export async function printLabel(barcode: string, qty = 1, printer?: string, format?: string): Promise<PrintLabelResponse> {
+  const body: PrintLabelOptions = { barcode, qty }
+  if (printer) body.printer = printer
+  if (format) body.format = format
   return jarvisMutate<PrintLabelResponse>(
     '/api/pos-actions/print-label',
     'POST',
-    { barcode, qty },
+    body,
   )
+}
+
+// ── Printers ─────────────────────────────────────────────────────────────────
+
+export interface PrinterInfo {
+  id: string
+  name: string
+  type: string
+  status: string
+  isDefault?: boolean
+}
+
+export interface PrintersResponse {
+  printers: PrinterInfo[]
+}
+
+export async function getPrinters(): Promise<PrintersResponse> {
+  return jarvisFetch<PrintersResponse>('/api/pos/printers')
+}
+
+export interface LabelFormat {
+  id: string
+  name: string
+  description?: string
+  width?: number
+  height?: number
+}
+
+export interface LabelFormatsResponse {
+  formats: LabelFormat[]
+}
+
+export async function getLabelFormats(): Promise<LabelFormatsResponse> {
+  return jarvisFetch<LabelFormatsResponse>('/api/pos/label-formats')
+}
+
+// ── Price Lock ───────────────────────────────────────────────────────────────
+
+export interface PriceLockResponse {
+  success: boolean
+  barcode: string
+  locked: boolean
+  message?: string
+}
+
+export async function setPriceLock(barcode: string, locked: boolean): Promise<PriceLockResponse> {
+  return jarvisMutate<PriceLockResponse>(
+    `/api/pos/price-lock/${encodeURIComponent(barcode)}`,
+    'PUT',
+    { locked },
+  )
+}
+
+export interface PriceLockItem {
+  barcode: string
+  itemCode: string
+  description: string
+  department: string
+  sellPrice: number
+  lockedAt: string
+}
+
+export interface PriceLocksListResponse {
+  items: PriceLockItem[]
+  total: number
+}
+
+export async function getPriceLocks(): Promise<PriceLocksListResponse> {
+  return jarvisFetch<PriceLocksListResponse>('/api/pos/price-locks')
 }
 
 // ── Adjust Stock ─────────────────────────────────────────────────────────────

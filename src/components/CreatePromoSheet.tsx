@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { X, Search, ScanBarcode, Tag, CheckCircle2, AlertCircle } from 'lucide-react'
-import { searchItems, createPromo, type SearchResult } from '../lib/jarvis'
+import { X, Search, ScanBarcode, Tag, CheckCircle2, AlertCircle, Lock } from 'lucide-react'
+import { searchItems, createPromo, setPriceLock, type SearchResult } from '../lib/jarvis'
 import { db } from '../lib/db'
 import BarcodeScanner from './BarcodeScanner'
 
@@ -34,6 +34,7 @@ export default function CreatePromoSheet({ open, onClose, onSuccess }: Props) {
   const [endDate, setEndDate] = useState('')
   const [description, setDescription] = useState('')
 
+  const [doLockPrice, setDoLockPrice] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [resultMsg, setResultMsg] = useState<{ success: boolean; sentToPos?: boolean; message?: string } | null>(null)
@@ -47,6 +48,7 @@ export default function CreatePromoSheet({ open, onClose, onSuccess }: Props) {
     setStartDate(new Date().toISOString().slice(0, 10))
     setEndDate('')
     setDescription('')
+    setDoLockPrice(false)
     setError(null)
     setResultMsg(null)
   }
@@ -105,6 +107,9 @@ export default function CreatePromoSheet({ open, onClose, onSuccess }: Props) {
         endDate,
         description: description || undefined,
       })
+      if (res.success && doLockPrice) {
+        try { await setPriceLock(selected.barcode, true) } catch { /* non-fatal */ }
+      }
       setResultMsg({ success: res.success, sentToPos: res.sentToPos, message: res.message })
       setStep('result')
 
@@ -229,6 +234,13 @@ export default function CreatePromoSheet({ open, onClose, onSuccess }: Props) {
                     className="mt-1 w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400 outline-none" />
                 </div>
               </div>
+
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input type="checkbox" checked={doLockPrice} onChange={e => setDoLockPrice(e.target.checked)}
+                  className="rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
+                <Lock size={14} className="text-gray-400" />
+                Lock promo price against host updates
+              </label>
 
               {error && <p className="text-xs text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
 
