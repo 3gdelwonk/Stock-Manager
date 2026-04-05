@@ -730,17 +730,9 @@ export interface PrintLabelResponse {
   jobId?: string
 }
 
-export interface PrintLabelOptions {
-  barcode: string
-  qty?: number
-  printer?: string
-  format?: string
-}
-
-export async function printLabel(barcode: string, qty = 1, printer?: string, format?: string): Promise<PrintLabelResponse> {
-  const body: PrintLabelOptions = { barcode, qty }
-  if (printer) body.printer = printer
-  if (format) body.format = format
+export async function printLabel(barcode: string, qty = 1, printerId?: string): Promise<PrintLabelResponse> {
+  const body: Record<string, unknown> = { barcode, qty }
+  if (printerId) body.printerId = printerId
   return jarvisMutate<PrintLabelResponse>(
     '/api/pos-actions/print-label',
     'POST',
@@ -751,35 +743,17 @@ export async function printLabel(barcode: string, qty = 1, printer?: string, for
 // ── Printers ─────────────────────────────────────────────────────────────────
 
 export interface PrinterInfo {
-  id: string
+  id: number
   name: string
-  type: string
-  status: string
-  isDefault?: boolean
+  networkPath: string
+  isLabel: boolean
+  isReport: boolean
+  queueId: string
+  queueRunning: boolean
 }
 
-export interface PrintersResponse {
-  printers: PrinterInfo[]
-}
-
-export async function getPrinters(): Promise<PrintersResponse> {
-  return jarvisFetch<PrintersResponse>('/api/pos/printers')
-}
-
-export interface LabelFormat {
-  id: string
-  name: string
-  description?: string
-  width?: number
-  height?: number
-}
-
-export interface LabelFormatsResponse {
-  formats: LabelFormat[]
-}
-
-export async function getLabelFormats(): Promise<LabelFormatsResponse> {
-  return jarvisFetch<LabelFormatsResponse>('/api/pos/label-formats')
+export async function getPrinters(): Promise<PrinterInfo[]> {
+  return jarvisFetch<PrinterInfo[]>('/api/pos/printers')
 }
 
 // ── Price Lock ───────────────────────────────────────────────────────────────
