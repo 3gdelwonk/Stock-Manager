@@ -88,7 +88,7 @@ export default function FABMenu({
           className={`w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all duration-300 ${
             open
               ? 'bg-gray-700 rotate-[135deg] shadow-xl'
-              : 'bg-violet-600 hover:bg-violet-700 rotate-0'
+              : 'bg-emerald-600 hover:bg-emerald-700 rotate-0'
           }`}
           aria-label={open ? 'Close menu' : 'Quick actions'}
         >
