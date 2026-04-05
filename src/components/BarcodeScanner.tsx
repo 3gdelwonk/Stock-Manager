@@ -148,14 +148,28 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-black">
-      <div className="flex items-center justify-between px-4 py-3 bg-black/80">
+      <div className="flex items-center justify-between px-4 py-3 bg-black/80 z-10">
         <p className="text-sm font-medium text-white">Scan Barcode</p>
         <button onClick={handleClose} className="text-white/70 hover:text-white p-1">
           <X size={20} />
         </button>
       </div>
-      <div className="flex-1 flex items-center justify-center">
+      <div className="flex-1 flex items-center justify-center relative">
         <div id="barcode-reader" className="w-full max-w-md" />
+        {/* Scanner overlay — viewfinder with scanning line */}
+        {!error && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="relative" style={{ width: 300, height: 250 }}>
+              {/* Corner brackets */}
+              <div className="absolute top-0 left-0 w-8 h-8 border-t-[3px] border-l-[3px] border-emerald-400 rounded-tl-md" />
+              <div className="absolute top-0 right-0 w-8 h-8 border-t-[3px] border-r-[3px] border-emerald-400 rounded-tr-md" />
+              <div className="absolute bottom-0 left-0 w-8 h-8 border-b-[3px] border-l-[3px] border-emerald-400 rounded-bl-md" />
+              <div className="absolute bottom-0 right-0 w-8 h-8 border-b-[3px] border-r-[3px] border-emerald-400 rounded-br-md" />
+              {/* Scanning line */}
+              <div className="absolute left-2 right-2 h-[2px] bg-gradient-to-r from-transparent via-emerald-400 to-transparent animate-scanner-line" />
+            </div>
+          </div>
+        )}
       </div>
       {/* Zoom controls — only show if camera supports zoom */}
       {zoomRange && (
