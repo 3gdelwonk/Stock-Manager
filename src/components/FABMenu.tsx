@@ -58,13 +58,13 @@ export default function FABMenu({
       {/* Backdrop */}
       {open && (
         <div
-          className="fixed inset-0 z-40 bg-black/30 transition-opacity"
+          className="absolute inset-0 z-40 bg-black/30 transition-opacity"
           onClick={close}
         />
       )}
 
       {/* FAB container — bottom right, above tab bar */}
-      <div className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+56px)] right-4 z-50 flex flex-col items-end gap-3">
+      <div className="absolute bottom-14 right-3 z-50 flex flex-col items-end gap-3 pb-safe">
         {/* Menu items — stack upward */}
         {open && MENU_ITEMS.map(({ key, label, icon: Icon, color, bg }, i) => (
           <button
