@@ -1,4 +1,4 @@
-import{c as e,a as k,d as n}from"./BarcodeScanner-D11mqRyt.js";import{r as c}from"./vendor-g3Nuhkd9.js";/**
+import{c as e,a as k,d as n}from"./BarcodeScanner-nsGWhNzL.js";import{r as c}from"./vendor-g3Nuhkd9.js";/**
  * @license lucide-react v0.479.0 - ISC
  *
  * This source code is licensed under the ISC license.
