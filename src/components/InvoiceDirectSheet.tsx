@@ -446,7 +446,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     setLines(prev => prev.map((l, i) => i === index ? { ...l, manualSearching: true } : l))
 
     try {
-      const res = await searchItems(line.manualSearchQuery!.trim(), 8)
+      const res = await searchItems(line.manualSearchQuery!.trim(), 20)
       setLines(prev => prev.map((l, i) => i === index
         ? { ...l, manualSearchResults: res.items, manualSearching: false }
         : l
@@ -454,6 +454,10 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     } catch {
       setLines(prev => prev.map((l, i) => i === index ? { ...l, manualSearching: false } : l))
     }
+  }
+
+  function deleteLine(index: number) {
+    setLines(prev => prev.filter((_, i) => i !== index))
   }
 
   function selectManualMatch(lineIndex: number, item: StockItem) {
@@ -883,14 +887,12 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                     <div className="px-3 py-2.5">
                       {/* Row header */}
                       <div className="flex items-start gap-2">
-                        {line.match && (
-                          <input
-                            type="checkbox"
-                            checked={line.included}
-                            onChange={e => setLines(prev => prev.map((l, j) => j === i ? { ...l, included: e.target.checked } : l))}
-                            className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                          />
-                        )}
+                        <input
+                          type="checkbox"
+                          checked={line.included}
+                          onChange={e => setLines(prev => prev.map((l, j) => j === i ? { ...l, included: e.target.checked } : l))}
+                          className="mt-0.5 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium text-gray-900 line-clamp-1">
                             {line.match?.description || line.parsed.description}
@@ -947,17 +949,24 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                         </div>
                       )}
 
-                      {/* Unmatched: show search button */}
-                      {!line.match && (
+                      {/* Search + Delete row */}
+                      <div className="flex items-center gap-2 mt-2">
                         <button
                           onClick={() => toggleManualSearch(i)}
-                          className="mt-2 flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
+                          className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
                         >
                           <Search size={12} />
-                          {line.manualSearchOpen ? 'Hide search' : 'Search to match'}
+                          {line.manualSearchOpen ? 'Hide' : line.match ? 'Change' : 'Search'}
                           {line.manualSearchOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
                         </button>
-                      )}
+                        <button
+                          onClick={() => deleteLine(i)}
+                          className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 ml-auto"
+                        >
+                          <X size={12} />
+                          Remove
+                        </button>
+                      </div>
                     </div>
 
                     {/* Manual search panel */}
@@ -980,7 +989,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                           </button>
                         </div>
                         {line.manualSearchResults && line.manualSearchResults.length > 0 && (
-                          <div className="space-y-1 max-h-32 overflow-auto">
+                          <div className="space-y-1 max-h-48 overflow-auto">
                             {line.manualSearchResults.map(item => (
                               <button
                                 key={item.itemCode}
@@ -988,13 +997,17 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                                 className="w-full text-left px-2 py-1.5 rounded bg-white hover:bg-indigo-50 border border-gray-100 text-xs"
                               >
                                 <p className="font-medium text-gray-900 line-clamp-1">{item.description}</p>
-                                <span className="text-gray-500">${item.sellPrice.toFixed(2)} &middot; {item.department}</span>
+                                <div className="flex items-center gap-2 mt-0.5 text-gray-500">
+                                  <span className="text-[10px] px-1 py-0.5 bg-gray-100 rounded">{item.department}</span>
+                                  <span>${item.sellPrice.toFixed(2)}</span>
+                                  {item.barcode && <span className="text-gray-400">{item.barcode}</span>}
+                                </div>
                               </button>
                             ))}
                           </div>
                         )}
                         {line.manualSearchResults && line.manualSearchResults.length === 0 && (
-                          <p className="text-xs text-gray-400">No results found</p>
+                          <p className="text-xs text-gray-400">No results found — try different keywords</p>
                         )}
                       </div>
                     )}
