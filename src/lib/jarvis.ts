@@ -703,6 +703,7 @@ export interface CreatePromoRequest {
   startDate: string
   endDate: string
   description?: string
+  promoType?: string
 }
 
 export interface CreatePromoResponse {
