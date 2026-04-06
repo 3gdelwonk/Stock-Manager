@@ -31,10 +31,30 @@ interface ApplyResult {
 }
 
 // ── Image compression ──────────────────────────────────────────────────────
-const MAX_DIM = 1200  // max pixels on longest side — plenty for OCR
-const JPEG_QUALITY = 0.5
+const MAX_DIM = 1000       // max pixels on longest side
+const MAX_BASE64 = 60_000  // ~60KB base64 cap per image (well under 100KB JSON limit)
 
-/** Resize an image (data URL or blob URL) to MAX_DIM and return raw base64 (no prefix) */
+/** Draw image/canvas source onto a canvas at target dimensions */
+function drawToCanvas(source: CanvasImageSource, sw: number, sh: number, tw: number, th: number): HTMLCanvasElement {
+  const c = document.createElement('canvas')
+  c.width = tw; c.height = th
+  const ctx = c.getContext('2d')!
+  ctx.drawImage(source, 0, 0, sw, sh, 0, 0, tw, th)
+  return c
+}
+
+/** Encode a canvas to JPEG base64, iteratively reducing quality until under MAX_BASE64 */
+function canvasToCompressedBase64(canvas: HTMLCanvasElement): string {
+  for (let q = 0.5; q >= 0.15; q -= 0.1) {
+    const dataUrl = canvas.toDataURL('image/jpeg', q)
+    const raw = dataUrl.replace(/^data:image\/\w+;base64,/, '')
+    if (raw.length <= MAX_BASE64) return dataUrl
+  }
+  // Last resort: lowest quality
+  return canvas.toDataURL('image/jpeg', 0.1)
+}
+
+/** Resize an image (data URL) and compress to fit under MAX_BASE64, returns full data URL */
 function compressImage(src: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -45,12 +65,8 @@ function compressImage(src: string): Promise<string> {
         w = Math.round(w * ratio)
         h = Math.round(h * ratio)
       }
-      const c = document.createElement('canvas')
-      c.width = w; c.height = h
-      const ctx = c.getContext('2d')!
-      ctx.drawImage(img, 0, 0, w, h)
-      const dataUrl = c.toDataURL('image/jpeg', JPEG_QUALITY)
-      resolve(dataUrl.replace(/^data:image\/\w+;base64,/, ''))
+      const c = drawToCanvas(img, img.naturalWidth, img.naturalHeight, w, h)
+      resolve(canvasToCompressedBase64(c))
     }
     img.onerror = () => reject(new Error('Failed to load image for compression'))
     img.src = src
@@ -227,8 +243,8 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     if (!ctx) return
     ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, w, h)
 
-    const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY)
-    // Store data URL for thumbnails, strip prefix when sending
+    // Iteratively compress until under size limit
+    const dataUrl = canvasToCompressedBase64(canvas)
     setPages(prev => [...prev, dataUrl])
 
     // Flash effect
@@ -247,9 +263,8 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
         reader.onload = () => resolve(reader.result as string)
         reader.readAsDataURL(file)
       })
-      // Resize + compress, then re-add prefix for thumbnail display
-      const raw = await compressImage(dataUrl)
-      setPages(prev => [...prev, `data:image/jpeg;base64,${raw}`])
+      const compressed = await compressImage(dataUrl)
+      setPages(prev => [...prev, compressed])
     }
     // Reset input so same files can be re-selected
     e.target.value = ''
