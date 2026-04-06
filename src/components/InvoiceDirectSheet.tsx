@@ -31,8 +31,8 @@ interface ApplyResult {
 }
 
 // ── Image processing ───────────────────────────────────────────────────────
-const MAX_DIM = 1000  // balanced for OCR + payload size
-const JPEG_Q = 0.7    // grayscale keeps file small (~50-70KB base64)
+const MAX_DIM = 1400  // good resolution for OCR
+const JPEG_Q = 0.8    // high quality — 5MB server limit is plenty
 
 /** Resize + convert to grayscale on a canvas. Returns the canvas. */
 function processToCanvas(source: CanvasImageSource, srcW: number, srcH: number): HTMLCanvasElement {
