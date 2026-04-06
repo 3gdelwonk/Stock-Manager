@@ -1190,8 +1190,21 @@ export interface ParseInvoiceResponse {
   lines: ParsedInvoiceLine[]
 }
 
-export async function parseInvoice(imageBase64: string): Promise<ParseInvoiceResponse> {
-  return jarvisMutate<ParseInvoiceResponse>('/api/pos/parse-invoice', 'POST', { image: imageBase64 })
+export async function parseInvoice(images: string[]): Promise<ParseInvoiceResponse> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 30_000) // 30s for multi-page
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/pos/parse-invoice`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': getApiKey() },
+      body: JSON.stringify({ images }),
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(`Parse failed: ${res.status}`)
+    return (await res.json()) as ParseInvoiceResponse
+  } finally {
+    clearTimeout(timeout)
+  }
 }
 
 // ── Store Locations ─────────────────────────────────────────────────────────

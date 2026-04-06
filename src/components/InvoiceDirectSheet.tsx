@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { X, Camera, Upload, Loader2, AlertCircle, CheckCircle2, ArrowRight, Search, FileText, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, Camera, Upload, Loader2, AlertCircle, CheckCircle2, ArrowRight, Search, FileText, ChevronDown, ChevronUp, ArrowLeft } from 'lucide-react'
 import { parseInvoice, searchItems, changeAndSend, type StockItem, type ParsedInvoiceLine, type ChangeAndSendResponse } from '../lib/jarvis'
 import { db } from '../lib/db'
 
@@ -30,10 +30,26 @@ interface ApplyResult {
   message?: string
 }
 
+// ── A4 guide rect calculation ──────────────────────────────────────────────
+function calculateA4Rect(viewW: number, viewH: number, padding: number) {
+  const a4Ratio = 1 / 1.414
+  const maxW = viewW - padding * 2
+  const maxH = viewH - padding * 2
+  let w = maxW, h = maxW / a4Ratio
+  if (h > maxH) { h = maxH; w = maxH * a4Ratio }
+  const x = (viewW - w) / 2
+  const y = (viewH - h) / 2
+  return { x, y, width: w, height: h }
+}
+
 export default function InvoiceDirectSheet({ open, onClose }: Props) {
   const [step, setStep] = useState<Step>('capture')
-  const [imageData, setImageData] = useState<string | null>(null)
+  const [pages, setPages] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  // Scanner overlay
+  const [scannerOpen, setScannerOpen] = useState(false)
+  const [flashVisible, setFlashVisible] = useState(false)
 
   // Parse results
   const [supplier, setSupplier] = useState<string>('')
@@ -50,11 +66,16 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const scannerRef = useRef<HTMLDivElement>(null)
+
+  // Camera state
+  const [cameraActive, setCameraActive] = useState(false)
+  const [cameraReady, setCameraReady] = useState(false)
 
   // ── Reset ───────────────────────────────────────────────────────────────
   function reset() {
     setStep('capture')
-    setImageData(null)
+    setPages([])
     setError(null)
     setSupplier('')
     setInvoiceNumber('')
@@ -62,6 +83,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     setApplyProgress(0)
     setApplyTotal(0)
     setResults([])
+    setScannerOpen(false)
     stopCamera()
   }
 
@@ -71,9 +93,6 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
   }
 
   // ── Camera ──────────────────────────────────────────────────────────────
-  const [cameraActive, setCameraActive] = useState(false)
-  const [cameraReady, setCameraReady] = useState(false)
-
   function stopCamera() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop())
@@ -83,18 +102,23 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     setCameraReady(false)
   }
 
-  async function startCamera() {
+  function openScanner() {
     setError(null)
-    setCameraActive(true)   // render the <video> element first
+    setScannerOpen(true)
+    setCameraActive(true)
     setCameraReady(false)
   }
 
-  // Attach stream once the video element exists (cameraActive triggers render)
+  function closeScanner() {
+    stopCamera()
+    setScannerOpen(false)
+  }
+
+  // Attach stream once scanner is open and cameraActive
   useEffect(() => {
-    if (!cameraActive || imageData) return
+    if (!cameraActive || !scannerOpen) return
     let cancelled = false
 
-    // Small delay to ensure the video element is mounted
     const id = setTimeout(async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -107,14 +131,13 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
         streamRef.current = stream
         if (videoRef.current) {
           videoRef.current.srcObject = stream
-          // Wait for video to actually start playing
           videoRef.current.onloadedmetadata = () => {
             if (!cancelled) setCameraReady(true)
           }
         }
       } catch (err) {
         if (!cancelled) {
-          setCameraActive(false)
+          closeScanner()
           setError('Camera not available — check permissions or try Upload instead')
           console.warn('Camera error:', err)
         }
@@ -129,54 +152,84 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
         streamRef.current = null
       }
     }
-  }, [cameraActive, imageData])
+  }, [cameraActive, scannerOpen])
 
   // Stop camera on unmount / close
   useEffect(() => {
-    if (!open) stopCamera()
+    if (!open) { stopCamera(); setScannerOpen(false) }
     return () => stopCamera()
   }, [open])
 
+  // ── Capture photo with A4 crop ──────────────────────────────────────────
   function capturePhoto() {
     const video = videoRef.current
     const canvas = canvasRef.current
-    if (!video || !canvas) return
+    const scanner = scannerRef.current
+    if (!video || !canvas || !scanner) return
 
-    // Ensure we have actual video dimensions
     if (video.videoWidth === 0 || video.videoHeight === 0) {
       setError('Camera not ready yet — wait a moment and try again')
       return
     }
 
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
+    const displayW = scanner.clientWidth
+    const displayH = scanner.clientHeight
+    const a4 = calculateA4Rect(displayW, displayH, 32)
+
+    // Map display coords to video coords (object-cover)
+    const videoW = video.videoWidth
+    const videoH = video.videoHeight
+    const scale = Math.max(videoW / displayW, videoH / displayH)
+    const offsetX = (videoW - displayW * scale) / 2
+    const offsetY = (videoH - displayH * scale) / 2
+
+    const cropX = a4.x * scale + offsetX
+    const cropY = a4.y * scale + offsetY
+    const cropW = a4.width * scale
+    const cropH = a4.height * scale
+
+    canvas.width = cropW
+    canvas.height = cropH
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    ctx.drawImage(video, 0, 0)
+    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
 
     const base64 = canvas.toDataURL('image/jpeg', 0.85)
-    setImageData(base64)
-    stopCamera()
+    setPages(prev => [...prev, base64])
+
+    // Flash effect
+    setFlashVisible(true)
+    setTimeout(() => setFlashVisible(false), 150)
   }
 
+  // ── File upload (multi) ─────────────────────────────────────────────────
   function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = () => {
-      setImageData(reader.result as string)
-    }
-    reader.readAsDataURL(file)
+    const files = e.target.files
+    if (!files || files.length === 0) return
+
+    Array.from(files).forEach(file => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        setPages(prev => [...prev, reader.result as string])
+      }
+      reader.readAsDataURL(file)
+    })
+    // Reset input so same files can be re-selected
+    e.target.value = ''
+  }
+
+  function removePage(index: number) {
+    setPages(prev => prev.filter((_, i) => i !== index))
   }
 
   // ── Parse & Match ───────────────────────────────────────────────────────
   async function handleParse() {
-    if (!imageData) return
+    if (pages.length === 0) return
     setError(null)
     setStep('parsing')
 
     try {
-      const result = await parseInvoice(imageData)
+      const result = await parseInvoice(pages)
       setSupplier(result.supplier || '')
       setInvoiceNumber(result.invoiceNumber || '')
 
@@ -206,7 +259,6 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
           included: bestMatch !== null,
         })
 
-        // Small delay to avoid hammering API
         await new Promise(r => setTimeout(r, 100))
       }
 
@@ -275,7 +327,6 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
           message: res.message,
         })
 
-        // Log to quick action log
         await db.quickActionLog.add({
           actionType: 'price-change',
           barcode,
@@ -312,6 +363,151 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
 
   return (
     <>
+      {/* Hidden canvas — always mounted for capture */}
+      <canvas ref={canvasRef} className="hidden" />
+
+      {/* ── Full-screen document scanner overlay ── */}
+      {scannerOpen && (
+        <div ref={scannerRef} className="fixed inset-0 z-[60] bg-black">
+          {/* Video background */}
+          <video
+            ref={videoRef}
+            autoPlay playsInline muted
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+
+          {/* Loading overlay */}
+          {!cameraReady && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black z-10">
+              <Loader2 size={32} className="text-indigo-400 animate-spin" />
+              <p className="text-sm text-gray-400 mt-3">Starting camera...</p>
+            </div>
+          )}
+
+          {/* A4 guide overlay */}
+          {cameraReady && (
+            <div className="absolute inset-0 pointer-events-none z-20">
+              {/* Darkened area with transparent A4 window */}
+              <div
+                className="absolute rounded-lg"
+                style={{
+                  ...(() => {
+                    const rect = calculateA4Rect(window.innerWidth, window.innerHeight, 32)
+                    return { left: rect.x, top: rect.y, width: rect.width, height: rect.height }
+                  })(),
+                  boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)',
+                  border: '1px solid rgba(255,255,255,0.3)',
+                }}
+              />
+              {/* Corner markers */}
+              {(() => {
+                const rect = calculateA4Rect(window.innerWidth, window.innerHeight, 32)
+                const sz = 24
+                const bw = 3
+                const corners = [
+                  // top-left
+                  { left: rect.x, top: rect.y, borderLeft: `${bw}px solid white`, borderTop: `${bw}px solid white`, borderRadius: '4px 0 0 0' },
+                  // top-right
+                  { left: rect.x + rect.width - sz, top: rect.y, borderRight: `${bw}px solid white`, borderTop: `${bw}px solid white`, borderRadius: '0 4px 0 0' },
+                  // bottom-left
+                  { left: rect.x, top: rect.y + rect.height - sz, borderLeft: `${bw}px solid white`, borderBottom: `${bw}px solid white`, borderRadius: '0 0 0 4px' },
+                  // bottom-right
+                  { left: rect.x + rect.width - sz, top: rect.y + rect.height - sz, borderRight: `${bw}px solid white`, borderBottom: `${bw}px solid white`, borderRadius: '0 0 4px 0' },
+                ]
+                return corners.map((style, i) => (
+                  <div key={i} className="absolute" style={{ ...style, width: sz, height: sz }} />
+                ))
+              })()}
+              {/* Hint text */}
+              {(() => {
+                const rect = calculateA4Rect(window.innerWidth, window.innerHeight, 32)
+                return (
+                  <p
+                    className="absolute text-xs text-white/70 text-center w-full"
+                    style={{ top: rect.y + rect.height + 12 }}
+                  >
+                    Align document within frame
+                  </p>
+                )
+              })()}
+            </div>
+          )}
+
+          {/* Flash effect */}
+          {flashVisible && (
+            <div className="absolute inset-0 bg-white z-30 animate-pulse" style={{ animationDuration: '150ms' }} />
+          )}
+
+          {/* Top bar */}
+          <div className="absolute top-0 left-0 right-0 z-40 flex items-center justify-between px-4 pt-12 pb-3">
+            <button
+              onClick={closeScanner}
+              className="flex items-center gap-1 text-white text-sm font-medium bg-black/30 rounded-full px-3 py-1.5 backdrop-blur-sm"
+            >
+              <ArrowLeft size={16} />
+              Back
+            </button>
+            {pages.length > 0 && (
+              <div className="flex items-center gap-1.5 text-white text-sm font-medium bg-black/30 rounded-full px-3 py-1.5 backdrop-blur-sm">
+                <FileText size={14} />
+                {pages.length} page{pages.length !== 1 ? 's' : ''}
+              </div>
+            )}
+          </div>
+
+          {/* Bottom bar */}
+          {cameraReady && (
+            <div className="absolute bottom-0 left-0 right-0 z-40 pb-10 pt-4 bg-gradient-to-t from-black/60 to-transparent">
+              {/* Thumbnail strip */}
+              {pages.length > 0 && (
+                <div className="flex gap-2 px-4 mb-4 overflow-x-auto">
+                  {pages.map((page, i) => (
+                    <div key={i} className="relative shrink-0">
+                      <img
+                        src={page}
+                        alt={`Page ${i + 1}`}
+                        className="w-12 h-[68px] object-cover rounded border-2 border-white/50"
+                      />
+                      <button
+                        onClick={() => removePage(i)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center"
+                      >
+                        <X size={10} className="text-white" />
+                      </button>
+                      <span className="absolute bottom-0 left-0 right-0 text-center text-[8px] text-white bg-black/50 rounded-b">
+                        {i + 1}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Shutter + Done */}
+              <div className="flex items-center justify-center gap-6">
+                {pages.length > 0 && (
+                  <button
+                    onClick={closeScanner}
+                    className="px-4 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-full"
+                  >
+                    Done ({pages.length})
+                  </button>
+                )}
+                <button
+                  onClick={capturePhoto}
+                  className="w-16 h-16 rounded-full border-4 border-white flex items-center justify-center active:scale-95 transition-transform"
+                  aria-label="Capture page"
+                >
+                  <div className="w-12 h-12 rounded-full bg-white" />
+                </button>
+                {/* Spacer to balance layout when Done is visible */}
+                {pages.length > 0 && <div className="w-[88px]" />}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Bottom sheet ── */}
       <div className="fixed inset-0 z-40 bg-black/40" onClick={handleClose} />
       <div className="fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-2xl shadow-2xl max-h-[92vh] flex flex-col">
         {/* Handle + header */}
@@ -335,102 +531,75 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                 </div>
               )}
 
-              {/* Image preview */}
-              {imageData && (
-                <div className="relative">
-                  <img src={imageData} alt="Invoice" className="w-full rounded-lg border border-gray-200 max-h-48 object-contain bg-gray-50" />
-                  <button
-                    onClick={() => setImageData(null)}
-                    className="absolute top-2 right-2 p-1 bg-black/50 rounded-full text-white"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
-
-              {/* Hidden canvas — always mounted for capture */}
-              <canvas ref={canvasRef} className="hidden" />
-
-              {/* Camera view */}
-              {cameraActive && !imageData && (
-                <div className="relative">
-                  <video
-                    ref={videoRef}
-                    autoPlay playsInline muted
-                    className="w-full rounded-lg border border-gray-200 max-h-64 object-cover bg-black"
-                  />
-                  {/* Loading overlay while camera initializes */}
-                  {!cameraReady && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 rounded-lg">
-                      <Loader2 size={24} className="text-indigo-400 animate-spin" />
-                      <p className="text-xs text-gray-400 mt-2">Starting camera...</p>
-                    </div>
-                  )}
-                  {/* Capture button — only when camera is ready */}
-                  {cameraReady && (
-                    <button
-                      onClick={capturePhoto}
-                      className="absolute bottom-3 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full bg-white border-4 border-indigo-600 shadow-lg active:scale-95 transition-transform"
-                      aria-label="Take photo"
-                    />
-                  )}
-                  {/* Cancel camera */}
-                  <button
-                    onClick={stopCamera}
-                    className="absolute top-2 right-2 p-1.5 bg-black/50 rounded-full text-white hover:bg-black/70"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
-
-              {/* Capture buttons */}
-              {!imageData && !cameraActive && (
-                <div className="space-y-3">
-                  <p className="text-sm text-gray-500 text-center">Capture or upload a photo of the direct invoice</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      onClick={startCamera}
-                      className="flex flex-col items-center gap-2 p-4 bg-indigo-50 rounded-xl border border-indigo-100 hover:bg-indigo-100 transition-colors"
-                    >
-                      <Camera size={24} className="text-indigo-600" />
-                      <span className="text-sm font-medium text-indigo-700">Camera</span>
-                    </button>
-                    <button
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl border border-gray-200 hover:bg-gray-100 transition-colors"
-                    >
-                      <Upload size={24} className="text-gray-600" />
-                      <span className="text-sm font-medium text-gray-700">Upload</span>
-                    </button>
+              {/* Page gallery */}
+              {pages.length > 0 && (
+                <div>
+                  <p className="text-xs text-gray-500 mb-2">{pages.length} page{pages.length !== 1 ? 's' : ''} captured</p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {pages.map((page, i) => (
+                      <div key={i} className="relative group">
+                        <img
+                          src={page}
+                          alt={`Page ${i + 1}`}
+                          className="w-full aspect-[1/1.414] object-cover rounded-lg border border-gray-200"
+                        />
+                        <span className="absolute top-1 left-1 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded-full font-medium">
+                          {i + 1}
+                        </span>
+                        <button
+                          onClick={() => removePage(i)}
+                          className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center opacity-80 hover:opacity-100"
+                        >
+                          <X size={10} className="text-white" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                  />
                 </div>
               )}
 
-              {/* Parse + Retake buttons */}
-              {imageData && (
-                <div className="flex gap-2">
+              {/* Scan + Upload buttons */}
+              <div className="space-y-3">
+                {pages.length === 0 && (
+                  <p className="text-sm text-gray-500 text-center">Capture or upload invoice pages</p>
+                )}
+                <div className="grid grid-cols-2 gap-3">
                   <button
-                    onClick={() => { setImageData(null); setError(null) }}
-                    className="flex-1 py-3 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+                    onClick={openScanner}
+                    className="flex flex-col items-center gap-2 p-4 bg-indigo-50 rounded-xl border border-indigo-100 hover:bg-indigo-100 transition-colors"
                   >
-                    Retake
+                    <Camera size={24} className="text-indigo-600" />
+                    <span className="text-sm font-medium text-indigo-700">
+                      {pages.length > 0 ? 'Scan More' : 'Scan Pages'}
+                    </span>
                   </button>
                   <button
-                    onClick={handleParse}
-                    className="flex-[2] py-3 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex flex-col items-center gap-2 p-4 bg-gray-50 rounded-xl border border-gray-200 hover:bg-gray-100 transition-colors"
                   >
-                    <FileText size={16} />
-                    Parse Invoice
+                    <Upload size={24} className="text-gray-600" />
+                    <span className="text-sm font-medium text-gray-700">Upload</span>
                   </button>
                 </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleFileUpload}
+                  className="hidden"
+                />
+              </div>
+
+              {/* Parse button */}
+              {pages.length > 0 && (
+                <button
+                  onClick={handleParse}
+                  className="w-full py-3 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                >
+                  <FileText size={16} />
+                  Parse {pages.length} Page{pages.length !== 1 ? 's' : ''}
+                </button>
               )}
             </>
           )}
@@ -439,7 +608,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
           {step === 'parsing' && (
             <div className="flex flex-col items-center gap-3 py-12">
               <Loader2 size={32} className="text-indigo-600 animate-spin" />
-              <p className="text-sm text-gray-600">Parsing invoice...</p>
+              <p className="text-sm text-gray-600">Parsing {pages.length} page{pages.length !== 1 ? 's' : ''}...</p>
               <p className="text-xs text-gray-400">AI is reading the invoice details</p>
             </div>
           )}
