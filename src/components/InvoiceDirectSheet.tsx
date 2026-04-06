@@ -32,7 +32,7 @@ interface ApplyResult {
 
 // ── Image processing ───────────────────────────────────────────────────────
 const MAX_DIM = 1400  // good resolution for OCR
-const JPEG_Q = 0.8    // high quality — 5MB server limit is plenty
+const JPEG_Q = 0.8    // high quality — server limit is 5MB
 
 /** Resize + convert to grayscale on a canvas. Returns the canvas. */
 function processToCanvas(source: CanvasImageSource, srcW: number, srcH: number): HTMLCanvasElement {
@@ -56,7 +56,7 @@ function processToCanvas(source: CanvasImageSource, srcW: number, srcH: number):
   return c
 }
 
-/** Get a data URL (for thumbnails) from a processed canvas */
+/** Get a data URL from a processed canvas */
 function canvasToDataUrl(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL('image/jpeg', JPEG_Q)
 }
