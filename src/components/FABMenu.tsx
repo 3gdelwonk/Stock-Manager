@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, X, ScanBarcode, DollarSign, Printer, Tag, Clock, PackagePlus } from 'lucide-react'
+import { Plus, X, ScanBarcode, DollarSign, Printer, Tag, Clock, PackagePlus, FileText } from 'lucide-react'
 
 interface FABMenuProps {
   onSmartScan: () => void
@@ -8,9 +8,11 @@ interface FABMenuProps {
   onAddExpiry: () => void
   onBulkPrint: () => void
   onPromotions: () => void
+  onInvoiceDirect: () => void
 }
 
 const MENU_ITEMS = [
+  { key: 'invoiceDirect',  label: 'Invoice Directs', icon: FileText,     color: 'text-indigo-600', bg: 'bg-indigo-50' },
   { key: 'addExpiry',      label: 'Add Expiry',      icon: Clock,        color: 'text-purple-600', bg: 'bg-purple-50' },
   { key: 'promotions',     label: 'Promotions',      icon: Tag,          color: 'text-amber-600',  bg: 'bg-amber-50' },
   { key: 'bulkPrint',      label: 'Bulk Print',      icon: Printer,      color: 'text-rose-600',   bg: 'bg-rose-50' },
@@ -26,6 +28,7 @@ export default function FABMenu({
   onAddExpiry,
   onBulkPrint,
   onPromotions,
+  onInvoiceDirect,
 }: FABMenuProps) {
   const [open, setOpen] = useState(false)
 
@@ -46,6 +49,7 @@ export default function FABMenu({
     addExpiry: onAddExpiry,
     bulkPrint: onBulkPrint,
     promotions: onPromotions,
+    invoiceDirect: onInvoiceDirect,
   }
 
   function handleAction(key: string) {

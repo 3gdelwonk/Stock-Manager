@@ -6,8 +6,8 @@ import {
 } from 'lucide-react'
 import {
   checkConnection, getStockLevels, getPromotions, getTopSellers,
-  printLabel, getOrderInfo,
-  type StockItem, type LivePromotion, type TopSeller, type OrderInfo,
+  printLabel, getOrderInfo, getItemLocations,
+  type StockItem, type LivePromotion, type TopSeller, type OrderInfo, type ItemLocation,
 } from '../lib/jarvis'
 import { resolveBarcode, getAliasesForItem, setPrimaryBarcode } from '../lib/barcodeResolver'
 import { db, type BarcodeAlias } from '../lib/db'
@@ -91,10 +91,13 @@ const StockCard = memo(function StockCard({
   const [aliases, setAliases] = useState<BarcodeAlias[]>([])
   const aliasesFetched = useRef(false)
 
-  // Location state
+  // Location state (local DB)
   const [locEdit, setLocEdit] = useState(false)
   const [loc, setLoc] = useState({ aisle: '', bay: '', shelf: '', section: '' })
   const locLoaded = useRef(false)
+
+  // Server-side locations
+  const [serverLocs, setServerLocs] = useState<ItemLocation[]>([])
 
   function showActionMsg(msg: string) {
     setActionMsg(msg)
@@ -113,6 +116,8 @@ const StockCard = memo(function StockCard({
       db.products.where('barcode').equals(bc).first().then(p => {
         if (p) setLoc({ aisle: p.aisle || '', bay: p.bay || '', shelf: p.shelf || '', section: p.section || '' })
       })
+      // Fetch server-side locations
+      getItemLocations(stock.itemCode).then(setServerLocs).catch(() => {})
     }
   }, [expanded, stock.barcode, stock.itemCode])
 
@@ -355,6 +360,18 @@ const StockCard = memo(function StockCard({
                 <button onClick={() => setLocEdit(true)} className="text-gray-400 hover:text-gray-600"><Pencil size={12} /></button>
               )}
             </div>
+            {/* Server-side store locations */}
+            {serverLocs.length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {serverLocs.map((sl, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[10px] font-medium">
+                    <MapPin size={8} />
+                    {sl.path || sl.name}
+                    <span className="text-indigo-400 font-mono">{sl.shortCode}</span>
+                  </span>
+                ))}
+              </div>
+            )}
             {locEdit ? (
               <div className="grid grid-cols-4 gap-1.5">
                 {(['aisle', 'bay', 'shelf', 'section'] as const).map(f => (

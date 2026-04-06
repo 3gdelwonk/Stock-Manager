@@ -8,6 +8,7 @@ import {
   type SerperUsage, type SerperBudget,
 } from '../lib/serper'
 import ImportView from './ImportView'
+import StoreLocationManager from './StoreLocationManager'
 
 function UsageBar({ used, total, color }: { used: number; total: number; color: string }) {
   const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0
@@ -42,6 +43,7 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
   const [prefetching, setPrefetching] = useState(false)
   const [prefetchProgress, setPrefetchProgress] = useState<PrefetchProgress | null>(null)
   const [showImport, setShowImport] = useState(false)
+  const [showLocations, setShowLocations] = useState(false)
   const [cacheStats, setCacheStats] = useState<{ total: number; found: number; failed: number } | null>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -329,12 +331,20 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="space-y-2 border-t border-gray-100 pt-4">
-          <button
-            onClick={() => setShowImport(true)}
-            className="w-full py-2.5 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-600 transition-colors hover:bg-emerald-100"
-          >
-            Import Data
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setShowImport(true)}
+              className="py-2.5 rounded-lg text-sm font-medium bg-emerald-50 text-emerald-600 transition-colors hover:bg-emerald-100"
+            >
+              Import Data
+            </button>
+            <button
+              onClick={() => setShowLocations(true)}
+              className="py-2.5 rounded-lg text-sm font-medium bg-indigo-50 text-indigo-600 transition-colors hover:bg-indigo-100"
+            >
+              Store Locations
+            </button>
+          </div>
           {cacheStats && (
             <p className="text-xs text-gray-500">
               Image cache: {cacheStats.found} images saved, {cacheStats.failed} not found, {cacheStats.total} total
@@ -367,6 +377,7 @@ export default function SettingsSheet({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
+      <StoreLocationManager open={showLocations} onClose={() => setShowLocations(false)} />
     </div>
   )
 }

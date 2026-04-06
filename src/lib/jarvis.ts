@@ -1174,6 +1174,153 @@ export async function identifyProduct(imageBase64: string): Promise<{
   return jarvisMutate('/api/pos/identify-product', 'POST', { image: imageBase64 })
 }
 
+// ── Invoice Parsing ─────────────────────────────────────────────────────────
+
+export interface ParsedInvoiceLine {
+  description: string
+  unitCost: number
+  sellPrice: number
+  qty?: number
+}
+
+export interface ParseInvoiceResponse {
+  supplier?: string
+  invoiceNumber?: string
+  lines: ParsedInvoiceLine[]
+}
+
+export async function parseInvoice(imageBase64: string): Promise<ParseInvoiceResponse> {
+  return jarvisMutate<ParseInvoiceResponse>('/api/pos/parse-invoice', 'POST', { image: imageBase64 })
+}
+
+// ── Store Locations ─────────────────────────────────────────────────────────
+
+export interface LocationType {
+  id: number
+  name: string
+  [key: string]: unknown
+}
+
+export interface StoreLocation {
+  id: number
+  name: string
+  shortCode: string
+  typeId: number
+  typeName?: string
+  parentId: number | null
+  active?: boolean
+  children?: StoreLocation[]
+  itemCount?: number
+  [key: string]: unknown
+}
+
+export interface LocationItem {
+  itemCode: string
+  description?: string
+  barcode?: string
+  department?: string
+  [key: string]: unknown
+}
+
+export interface ItemLocation {
+  locationId: number
+  name: string
+  shortCode: string
+  typeName?: string
+  path?: string
+  [key: string]: unknown
+}
+
+export async function getLocationTypes(): Promise<LocationType[]> {
+  const data = await jarvisFetch<LocationType[] | { types: LocationType[] }>('/api/pos/location-types')
+  return Array.isArray(data) ? data : data.types
+}
+
+export async function getLocations(): Promise<StoreLocation[]> {
+  const data = await jarvisFetch<StoreLocation[] | { locations: StoreLocation[] }>('/api/pos/locations')
+  return Array.isArray(data) ? data : data.locations
+}
+
+export async function createLocation(body: {
+  name: string; shortCode: string; typeId: number; parentId?: number | null
+}): Promise<StoreLocation> {
+  return jarvisMutate<StoreLocation>('/api/pos/locations', 'POST', body)
+}
+
+export async function updateLocation(id: number, body: {
+  name?: string; shortCode?: string; typeId?: number; parentId?: number | null
+}): Promise<StoreLocation> {
+  return jarvisMutate<StoreLocation>(`/api/pos/locations/${id}`, 'PUT', body)
+}
+
+export async function deleteLocation(id: number): Promise<{ success: boolean }> {
+  const url = `${getBaseUrl()}/api/pos/locations/${id}`
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
+  try {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(`JARVISmart ${res.status}: ${res.statusText}`)
+    return res.json()
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export async function getItemLocations(itemCode: string): Promise<ItemLocation[]> {
+  const data = await jarvisFetch<ItemLocation[] | { locations: ItemLocation[] }>(
+    `/api/pos/locations/item/${encodeURIComponent(itemCode)}`
+  )
+  return Array.isArray(data) ? data : data.locations
+}
+
+export async function getLocationItems(locationId: number): Promise<LocationItem[]> {
+  const data = await jarvisFetch<LocationItem[] | { items: LocationItem[] }>(
+    `/api/pos/locations/${locationId}/items`
+  )
+  return Array.isArray(data) ? data : data.items
+}
+
+export async function assignItemToLocation(locationId: number, itemCode: string): Promise<{ success: boolean }> {
+  return jarvisMutate(`/api/pos/locations/${locationId}/items`, 'POST', { itemCode })
+}
+
+export async function removeItemFromLocation(locationId: number, itemCode: string): Promise<{ success: boolean }> {
+  const url = `${getBaseUrl()}/api/pos/locations/${locationId}/items/${encodeURIComponent(itemCode)}`
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
+  try {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
+      signal: controller.signal,
+    })
+    if (!res.ok) throw new Error(`JARVISmart ${res.status}: ${res.statusText}`)
+    return res.json()
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export async function bulkAssignItems(locationId: number, itemCodes: string[]): Promise<{ success: boolean; assigned?: number }> {
+  return jarvisMutate(`/api/pos/locations/${locationId}/bulk-assign`, 'POST', { itemCodes })
+}
+
+export async function assignDepartmentToLocation(locationId: number, department: string): Promise<{ success: boolean; assigned?: number }> {
+  return jarvisMutate(`/api/pos/locations/${locationId}/assign-department`, 'POST', { department })
+}
+
+export async function moveItemToLocation(locationId: number, itemCode: string): Promise<{ success: boolean }> {
+  return jarvisMutate(`/api/pos/locations/${locationId}/move`, 'PUT', { itemCode })
+}
+
+export async function bulkMoveItems(locationId: number, itemCodes: string[]): Promise<{ success: boolean; moved?: number }> {
+  return jarvisMutate(`/api/pos/locations/${locationId}/bulk-move`, 'PUT', { itemCodes })
+}
+
 // ── Customer Accounts ────────────────────────────────────────────────────────
 
 export interface CustomerAccount {
