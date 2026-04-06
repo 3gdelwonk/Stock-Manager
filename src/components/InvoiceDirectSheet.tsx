@@ -376,23 +376,47 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
         return
       }
 
-      // Auto-match
+      // Auto-match: try server's matchedItem first, then search by description keywords
       setStep('matching')
       const matched: MatchedLine[] = []
 
       for (const line of allLines) {
         let bestMatch: StockItem | null = null
         try {
-          const res = await searchItems(line.description, 5)
-          if (res.items.length > 0) {
-            bestMatch = res.items[0]
+          // 1. Try server's fuzzy-matched item code/name first
+          if (line.matchedItem) {
+            const res = await searchItems(line.matchedItem, 3)
+            if (res.items.length > 0) bestMatch = res.items[0]
+          }
+          // 2. Try barcode if available
+          if (!bestMatch && line.barcode) {
+            const res = await searchItems(line.barcode, 3)
+            if (res.items.length > 0) bestMatch = res.items[0]
+          }
+          // 3. Try order code
+          if (!bestMatch && line.orderCode) {
+            const res = await searchItems(line.orderCode, 3)
+            if (res.items.length > 0) bestMatch = res.items[0]
+          }
+          // 4. Try full invoice description
+          if (!bestMatch) {
+            const res = await searchItems(line.description, 5)
+            if (res.items.length > 0) bestMatch = res.items[0]
+          }
+          // 5. Try first 2-3 keywords (remove weights/sizes like "12kg")
+          if (!bestMatch) {
+            const keywords = line.description.replace(/\d+\s*(kg|g|ml|l|pk|pack)\b/gi, '').trim().split(/[\s\-,]+/).filter(w => w.length > 2).slice(0, 3).join(' ')
+            if (keywords && keywords !== line.description) {
+              const res = await searchItems(keywords, 5)
+              if (res.items.length > 0) bestMatch = res.items[0]
+            }
           }
         } catch { /* search failed, leave unmatched */ }
 
         matched.push({
           parsed: line,
           match: bestMatch,
-          newSellPrice: line.sellPrice,
+          newSellPrice: bestMatch?.sellPrice ?? line.sellPrice,
           included: bestMatch !== null,
         })
 
@@ -871,12 +895,22 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                           <p className="text-sm font-medium text-gray-900 line-clamp-1">
                             {line.match?.description || line.parsed.description}
                           </p>
-                          <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-500">
+                          {/* Invoice description if matched to a different POS name */}
+                          {line.match && line.match.description !== line.parsed.description && (
+                            <p className="text-[10px] text-gray-400 line-clamp-1 mt-0.5">Invoice: {line.parsed.description}</p>
+                          )}
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 text-xs text-gray-500">
                             {line.match && (
                               <span className="text-[10px] px-1 py-0.5 bg-gray-100 rounded">{line.match.department}</span>
                             )}
+                            {(line.parsed.qty ?? 0) > 0 && (
+                              <span className="text-[10px] px-1 py-0.5 bg-blue-50 text-blue-700 rounded">Qty: {line.parsed.qty}</span>
+                            )}
                             <span className="text-gray-400">Cost: ${line.parsed.unitCost.toFixed(2)}</span>
-                            {line.match && line.newSellPrice > 0 && (
+                            {line.parsed.sellPrice > 0 && (
+                              <span className="text-gray-400">Inv. Sell: ${line.parsed.sellPrice.toFixed(2)}</span>
+                            )}
+                            {line.match && line.newSellPrice > 0 && line.parsed.unitCost > 0 && (
                               <span className={`font-medium ${
                                 ((line.newSellPrice - line.parsed.unitCost) / line.newSellPrice * 100) < 15
                                   ? 'text-red-600' : 'text-emerald-600'
