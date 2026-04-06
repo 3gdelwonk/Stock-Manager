@@ -1182,12 +1182,39 @@ export interface ParsedInvoiceLine {
   unitCost: number
   sellPrice: number
   qty?: number
+  barcode?: string | null
+  orderCode?: string
+  matchedItem?: string
 }
 
 export interface ParseInvoiceResponse {
   supplier?: string
   invoiceNumber?: string
   lines: ParsedInvoiceLine[]
+}
+
+// Raw server response shape
+interface RawParseResponse {
+  ok?: boolean
+  invoice?: { number?: string; date?: string; supplier?: string }
+  items?: Array<{
+    invoiceDescription?: string
+    description?: string
+    orderCode?: string
+    barcode?: string | null
+    quantity?: number
+    cartonQty?: number
+    cartonCost?: number
+    unitCost?: number
+    sellPrice?: number
+    gstCode?: string
+    matchedItem?: string
+    [key: string]: unknown
+  }>
+  // Legacy flat format
+  supplier?: string
+  invoiceNumber?: string
+  lines?: ParsedInvoiceLine[]
 }
 
 export async function parseInvoice(imageBase64: string): Promise<ParseInvoiceResponse> {
@@ -1204,7 +1231,29 @@ export async function parseInvoice(imageBase64: string): Promise<ParseInvoiceRes
       const detail = await res.text().catch(() => '')
       throw new Error(`Parse failed: ${res.status}${detail ? ' — ' + detail : ''}`)
     }
-    return (await res.json()) as ParseInvoiceResponse
+    const raw: RawParseResponse = await res.json()
+
+    // Map server response to our normalized format
+    const supplier = raw.invoice?.supplier || raw.supplier || ''
+    const invoiceNumber = raw.invoice?.number || raw.invoiceNumber || ''
+
+    let lines: ParsedInvoiceLine[] = []
+    if (raw.items && raw.items.length > 0) {
+      // Server returns items[] with invoiceDescription, unitCost, etc.
+      lines = raw.items.map(item => ({
+        description: item.invoiceDescription || item.description || '',
+        unitCost: item.unitCost ?? item.cartonCost ?? 0,
+        sellPrice: item.sellPrice ?? 0,
+        qty: item.quantity ?? item.cartonQty ?? 1,
+        barcode: item.barcode,
+        orderCode: item.orderCode,
+        matchedItem: item.matchedItem,
+      }))
+    } else if (raw.lines && raw.lines.length > 0) {
+      lines = raw.lines
+    }
+
+    return { supplier, invoiceNumber, lines }
   } finally {
     clearTimeout(timeout)
   }
