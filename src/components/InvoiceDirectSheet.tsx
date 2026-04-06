@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
-import { X, Camera, Upload, Loader2, AlertCircle, CheckCircle2, ArrowRight, Search, FileText, ChevronDown, ChevronUp, ArrowLeft } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { X, Camera, Upload, Loader2, AlertCircle, CheckCircle2, ArrowRight, Search, FileText, ChevronDown, ChevronUp, ArrowLeft, Crop } from 'lucide-react'
 import { parseInvoice, searchItems, changeAndSend, type StockItem, type ParsedInvoiceLine, type ChangeAndSendResponse } from '../lib/jarvis'
 import { db } from '../lib/db'
 
@@ -108,6 +108,88 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
   const [cameraActive, setCameraActive] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
 
+  // Crop state
+  const [cropIndex, setCropIndex] = useState<number | null>(null)
+  const [cropRect, setCropRect] = useState({ x: 10, y: 10, w: 80, h: 80 }) // percentages
+  const cropImgRef = useRef<HTMLImageElement>(null)
+  const cropContainerRef = useRef<HTMLDivElement>(null)
+  const dragging = useRef<'move' | 'tl' | 'tr' | 'bl' | 'br' | null>(null)
+  const dragStart = useRef({ x: 0, y: 0, rect: { x: 0, y: 0, w: 0, h: 0 } })
+
+  // ── Crop ─────────────────────────────────────────────────────────────────
+  function openCrop(index: number) {
+    setCropIndex(index)
+    setCropRect({ x: 5, y: 5, w: 90, h: 90 })
+  }
+
+  function getPointerPct(e: React.TouchEvent | React.MouseEvent): { px: number; py: number } {
+    const container = cropContainerRef.current
+    if (!container) return { px: 0, py: 0 }
+    const rect = container.getBoundingClientRect()
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
+    return {
+      px: ((clientX - rect.left) / rect.width) * 100,
+      py: ((clientY - rect.top) / rect.height) * 100,
+    }
+  }
+
+  const handleCropPointerDown = useCallback((e: React.TouchEvent | React.MouseEvent, handle: 'move' | 'tl' | 'tr' | 'bl' | 'br') => {
+    e.preventDefault()
+    dragging.current = handle
+    const { px, py } = getPointerPct(e)
+    dragStart.current = { x: px, y: py, rect: { ...cropRect } }
+  }, [cropRect])
+
+  const handleCropPointerMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    if (!dragging.current) return
+    e.preventDefault()
+    const { px, py } = getPointerPct(e)
+    const dx = px - dragStart.current.x
+    const dy = py - dragStart.current.y
+    const r = dragStart.current.rect
+
+    if (dragging.current === 'move') {
+      const nx = Math.max(0, Math.min(100 - r.w, r.x + dx))
+      const ny = Math.max(0, Math.min(100 - r.h, r.y + dy))
+      setCropRect({ ...r, x: nx, y: ny })
+    } else {
+      let { x, y, w, h } = r
+      if (dragging.current === 'tl') { x += dx; y += dy; w -= dx; h -= dy }
+      if (dragging.current === 'tr') { w += dx; y += dy; h -= dy }
+      if (dragging.current === 'bl') { x += dx; w -= dx; h += dy }
+      if (dragging.current === 'br') { w += dx; h += dy }
+      // Clamp min size 10%
+      if (w < 10) w = 10
+      if (h < 10) h = 10
+      if (x < 0) { w += x; x = 0 }
+      if (y < 0) { h += y; y = 0 }
+      if (x + w > 100) w = 100 - x
+      if (y + h > 100) h = 100 - y
+      setCropRect({ x, y, w, h })
+    }
+  }, [])
+
+  const handleCropPointerUp = useCallback(() => { dragging.current = null }, [])
+
+  function applyCrop() {
+    if (cropIndex === null) return
+    const img = cropImgRef.current
+    if (!img) return
+
+    const c = document.createElement('canvas')
+    const sx = (cropRect.x / 100) * img.naturalWidth
+    const sy = (cropRect.y / 100) * img.naturalHeight
+    const sw = (cropRect.w / 100) * img.naturalWidth
+    const sh = (cropRect.h / 100) * img.naturalHeight
+    c.width = sw; c.height = sh
+    c.getContext('2d')!.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
+    const cropped = c.toDataURL('image/jpeg', JPEG_Q)
+
+    setPages(prev => prev.map((p, i) => i === cropIndex ? cropped : p))
+    setCropIndex(null)
+  }
+
   // ── Reset ───────────────────────────────────────────────────────────────
   function reset() {
     setStep('capture')
@@ -120,6 +202,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     setApplyTotal(0)
     setResults([])
     setScannerOpen(false)
+    setCropIndex(null)
     stopCamera()
   }
 
@@ -272,8 +355,9 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
       let detectedInvoiceNumber = ''
 
       for (const page of pages) {
-        // Send full data URL — server needs the prefix to identify MIME type for AI vision
-        const result = await parseInvoice(page)
+        // Strip data URL prefix — Anthropic API needs raw base64 only
+        const raw = page.replace(/^data:image\/\w+;base64,/, '')
+        const result = await parseInvoice(raw)
         console.log('[InvoiceDirectSheet] parseInvoice response:', JSON.stringify(result).slice(0, 500))
         if (result.supplier && !detectedSupplier) detectedSupplier = result.supplier
         if (result.invoiceNumber && !detectedInvoiceNumber) detectedInvoiceNumber = result.invoiceNumber
@@ -415,6 +499,71 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     <>
       {/* Hidden canvas — always mounted for capture */}
       <canvas ref={canvasRef} className="hidden" />
+
+      {/* ── Crop overlay ── */}
+      {cropIndex !== null && pages[cropIndex] && (
+        <div className="fixed inset-0 z-[70] bg-black flex flex-col">
+          {/* Top bar */}
+          <div className="flex items-center justify-between px-4 pt-12 pb-3">
+            <button onClick={() => setCropIndex(null)} className="text-white text-sm font-medium bg-white/20 rounded-full px-3 py-1.5">
+              Cancel
+            </button>
+            <p className="text-white text-sm font-medium">Crop Page {cropIndex + 1}</p>
+            <button onClick={applyCrop} className="text-white text-sm font-semibold bg-indigo-600 rounded-full px-3 py-1.5">
+              Apply
+            </button>
+          </div>
+          {/* Crop area */}
+          <div
+            ref={cropContainerRef}
+            className="flex-1 relative mx-4 mb-8 select-none touch-none"
+            onMouseMove={handleCropPointerMove}
+            onMouseUp={handleCropPointerUp}
+            onMouseLeave={handleCropPointerUp}
+            onTouchMove={handleCropPointerMove}
+            onTouchEnd={handleCropPointerUp}
+          >
+            <img
+              ref={cropImgRef}
+              src={pages[cropIndex]}
+              alt="Crop"
+              className="absolute inset-0 w-full h-full object-contain"
+            />
+            {/* Darkened overlay outside crop */}
+            <div className="absolute inset-0">
+              <div className="absolute inset-0 bg-black/60" />
+              <div
+                className="absolute bg-transparent"
+                style={{
+                  left: `${cropRect.x}%`, top: `${cropRect.y}%`,
+                  width: `${cropRect.w}%`, height: `${cropRect.h}%`,
+                  boxShadow: '0 0 0 9999px rgba(0,0,0,0.6)',
+                  border: '2px solid white',
+                }}
+                onMouseDown={e => handleCropPointerDown(e, 'move')}
+                onTouchStart={e => handleCropPointerDown(e, 'move')}
+              />
+              {/* Corner handles */}
+              {(['tl', 'tr', 'bl', 'br'] as const).map(corner => {
+                const isLeft = corner.includes('l')
+                const isTop = corner.includes('t')
+                return (
+                  <div
+                    key={corner}
+                    className="absolute w-6 h-6 bg-white rounded-full border-2 border-indigo-600 z-10"
+                    style={{
+                      left: `calc(${cropRect.x + (isLeft ? 0 : cropRect.w)}% - 12px)`,
+                      top: `calc(${cropRect.y + (isTop ? 0 : cropRect.h)}% - 12px)`,
+                    }}
+                    onMouseDown={e => handleCropPointerDown(e, corner)}
+                    onTouchStart={e => handleCropPointerDown(e, corner)}
+                  />
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Full-screen document scanner overlay ── */}
       {scannerOpen && (
@@ -584,7 +733,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
               {/* Page gallery */}
               {pages.length > 0 && (
                 <div>
-                  <p className="text-xs text-gray-500 mb-2">{pages.length} page{pages.length !== 1 ? 's' : ''} captured</p>
+                  <p className="text-xs text-gray-500 mb-2">{pages.length} page{pages.length !== 1 ? 's' : ''} captured — tap crop to trim</p>
                   <div className="grid grid-cols-4 gap-2">
                     {pages.map((page, i) => (
                       <div key={i} className="relative group">
@@ -596,12 +745,20 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                         <span className="absolute top-1 left-1 text-[10px] bg-black/60 text-white px-1.5 py-0.5 rounded-full font-medium">
                           {i + 1}
                         </span>
-                        <button
-                          onClick={() => removePage(i)}
-                          className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center opacity-80 hover:opacity-100"
-                        >
-                          <X size={10} className="text-white" />
-                        </button>
+                        <div className="absolute top-1 right-1 flex flex-col gap-1">
+                          <button
+                            onClick={() => removePage(i)}
+                            className="w-5 h-5 bg-red-500 rounded-full flex items-center justify-center opacity-80 hover:opacity-100"
+                          >
+                            <X size={10} className="text-white" />
+                          </button>
+                          <button
+                            onClick={() => openCrop(i)}
+                            className="w-5 h-5 bg-indigo-600 rounded-full flex items-center justify-center opacity-80 hover:opacity-100"
+                          >
+                            <Crop size={10} className="text-white" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
