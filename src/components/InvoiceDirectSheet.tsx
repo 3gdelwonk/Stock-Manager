@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { X, Camera, Upload, Loader2, AlertCircle, CheckCircle2, ArrowRight, Search, FileText, ChevronDown, ChevronUp } from 'lucide-react'
 import { parseInvoice, searchItems, changeAndSend, type StockItem, type ParsedInvoiceLine, type ChangeAndSendResponse } from '../lib/jarvis'
 import { db } from '../lib/db'
