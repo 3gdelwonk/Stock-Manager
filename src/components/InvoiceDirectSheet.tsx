@@ -31,8 +31,8 @@ interface ApplyResult {
 }
 
 // ── Image compression ──────────────────────────────────────────────────────
-const MAX_DIM = 1500  // max pixels on longest side — plenty for OCR
-const JPEG_QUALITY = 0.6
+const MAX_DIM = 1200  // max pixels on longest side — plenty for OCR
+const JPEG_QUALITY = 0.5
 
 /** Resize an image (data URL or blob URL) to MAX_DIM and return raw base64 (no prefix) */
 function compressImage(src: string): Promise<string> {
@@ -266,13 +266,23 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     setStep('parsing')
 
     try {
-      // Strip data URL prefix — send raw base64 only
-      const rawImages = pages.map(p => p.replace(/^data:image\/\w+;base64,/, ''))
-      const result = await parseInvoice(rawImages)
-      setSupplier(result.supplier || '')
-      setInvoiceNumber(result.invoiceNumber || '')
+      // Send pages one at a time to avoid 413 payload too large
+      let allLines: ParsedInvoiceLine[] = []
+      let detectedSupplier = ''
+      let detectedInvoiceNumber = ''
 
-      if (!result.lines || result.lines.length === 0) {
+      for (const page of pages) {
+        const raw = page.replace(/^data:image\/\w+;base64,/, '')
+        const result = await parseInvoice([raw])
+        if (result.supplier && !detectedSupplier) detectedSupplier = result.supplier
+        if (result.invoiceNumber && !detectedInvoiceNumber) detectedInvoiceNumber = result.invoiceNumber
+        if (result.lines) allLines = allLines.concat(result.lines)
+      }
+
+      setSupplier(detectedSupplier)
+      setInvoiceNumber(detectedInvoiceNumber)
+
+      if (allLines.length === 0) {
         setError('No items found in invoice. Try retaking the photo with better lighting.')
         setStep('capture')
         return
@@ -282,7 +292,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
       setStep('matching')
       const matched: MatchedLine[] = []
 
-      for (const line of result.lines) {
+      for (const line of allLines) {
         let bestMatch: StockItem | null = null
         try {
           const res = await searchItems(line.description, 5)
