@@ -272,8 +272,9 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
       let detectedInvoiceNumber = ''
 
       for (const page of pages) {
-        const raw = page.replace(/^data:image\/\w+;base64,/, '')
-        const result = await parseInvoice(raw)
+        // Send full data URL — server needs the prefix to identify MIME type for AI vision
+        const result = await parseInvoice(page)
+        console.log('[InvoiceDirectSheet] parseInvoice response:', JSON.stringify(result).slice(0, 500))
         if (result.supplier && !detectedSupplier) detectedSupplier = result.supplier
         if (result.invoiceNumber && !detectedInvoiceNumber) detectedInvoiceNumber = result.invoiceNumber
         if (result.lines) allLines = allLines.concat(result.lines)
@@ -283,7 +284,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
       setInvoiceNumber(detectedInvoiceNumber)
 
       if (allLines.length === 0) {
-        setError('No items found in invoice. Try retaking the photo with better lighting.')
+        setError('No items found in invoice. Check the console (F12) for the server response.')
         setStep('capture')
         return
       }
