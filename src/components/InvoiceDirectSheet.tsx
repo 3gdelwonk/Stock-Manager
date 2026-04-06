@@ -72,6 +72,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
 
   // ── Camera ──────────────────────────────────────────────────────────────
   const [cameraActive, setCameraActive] = useState(false)
+  const [cameraReady, setCameraReady] = useState(false)
 
   function stopCamera() {
     if (streamRef.current) {
@@ -79,22 +80,56 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
       streamRef.current = null
     }
     setCameraActive(false)
+    setCameraReady(false)
   }
 
-  const startCamera = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-      })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
+  async function startCamera() {
+    setError(null)
+    setCameraActive(true)   // render the <video> element first
+    setCameraReady(false)
+  }
+
+  // Attach stream once the video element exists (cameraActive triggers render)
+  useEffect(() => {
+    if (!cameraActive || imageData) return
+    let cancelled = false
+
+    // Small delay to ensure the video element is mounted
+    const id = setTimeout(async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+        })
+        if (cancelled) {
+          stream.getTracks().forEach(t => t.stop())
+          return
+        }
+        streamRef.current = stream
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream
+          // Wait for video to actually start playing
+          videoRef.current.onloadedmetadata = () => {
+            if (!cancelled) setCameraReady(true)
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setCameraActive(false)
+          setError('Camera not available — check permissions or try Upload instead')
+          console.warn('Camera error:', err)
+        }
       }
-      setCameraActive(true)
-    } catch {
-      setError('Camera not available')
+    }, 50)
+
+    return () => {
+      cancelled = true
+      clearTimeout(id)
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop())
+        streamRef.current = null
+      }
     }
-  }, [])
+  }, [cameraActive, imageData])
 
   // Stop camera on unmount / close
   useEffect(() => {
@@ -106,6 +141,12 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     const video = videoRef.current
     const canvas = canvasRef.current
     if (!video || !canvas) return
+
+    // Ensure we have actual video dimensions
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      setError('Camera not ready yet — wait a moment and try again')
+      return
+    }
 
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
@@ -307,20 +348,39 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                 </div>
               )}
 
+              {/* Hidden canvas — always mounted for capture */}
+              <canvas ref={canvasRef} className="hidden" />
+
               {/* Camera view */}
               {cameraActive && !imageData && (
                 <div className="relative">
                   <video
                     ref={videoRef}
                     autoPlay playsInline muted
-                    className="w-full rounded-lg border border-gray-200 max-h-64 object-cover"
+                    className="w-full rounded-lg border border-gray-200 max-h-64 object-cover bg-black"
                   />
-                  <canvas ref={canvasRef} className="hidden" />
+                  {/* Loading overlay while camera initializes */}
+                  {!cameraReady && (
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 rounded-lg">
+                      <Loader2 size={24} className="text-indigo-400 animate-spin" />
+                      <p className="text-xs text-gray-400 mt-2">Starting camera...</p>
+                    </div>
+                  )}
+                  {/* Capture button — only when camera is ready */}
+                  {cameraReady && (
+                    <button
+                      onClick={capturePhoto}
+                      className="absolute bottom-3 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full bg-white border-4 border-indigo-600 shadow-lg active:scale-95 transition-transform"
+                      aria-label="Take photo"
+                    />
+                  )}
+                  {/* Cancel camera */}
                   <button
-                    onClick={capturePhoto}
-                    className="absolute bottom-3 left-1/2 -translate-x-1/2 w-14 h-14 rounded-full bg-white border-4 border-indigo-600 shadow-lg"
-                    aria-label="Take photo"
-                  />
+                    onClick={stopCamera}
+                    className="absolute top-2 right-2 p-1.5 bg-black/50 rounded-full text-white hover:bg-black/70"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
               )}
 
@@ -348,22 +408,29 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                     ref={fileInputRef}
                     type="file"
                     accept="image/*"
-                    capture="environment"
                     onChange={handleFileUpload}
                     className="hidden"
                   />
                 </div>
               )}
 
-              {/* Parse button */}
+              {/* Parse + Retake buttons */}
               {imageData && (
-                <button
-                  onClick={handleParse}
-                  className="w-full py-3 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
-                >
-                  <FileText size={16} />
-                  Parse Invoice
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setImageData(null); setError(null) }}
+                    className="flex-1 py-3 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+                  >
+                    Retake
+                  </button>
+                  <button
+                    onClick={handleParse}
+                    className="flex-[2] py-3 bg-indigo-600 text-white text-sm font-semibold rounded-lg hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <FileText size={16} />
+                    Parse Invoice
+                  </button>
+                </div>
               )}
             </>
           )}
