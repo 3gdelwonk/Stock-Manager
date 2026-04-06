@@ -30,6 +30,33 @@ interface ApplyResult {
   message?: string
 }
 
+// ── Image compression ──────────────────────────────────────────────────────
+const MAX_DIM = 1500  // max pixels on longest side — plenty for OCR
+const JPEG_QUALITY = 0.6
+
+/** Resize an image (data URL or blob URL) to MAX_DIM and return raw base64 (no prefix) */
+function compressImage(src: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      let w = img.naturalWidth, h = img.naturalHeight
+      if (w > MAX_DIM || h > MAX_DIM) {
+        const ratio = Math.min(MAX_DIM / w, MAX_DIM / h)
+        w = Math.round(w * ratio)
+        h = Math.round(h * ratio)
+      }
+      const c = document.createElement('canvas')
+      c.width = w; c.height = h
+      const ctx = c.getContext('2d')!
+      ctx.drawImage(img, 0, 0, w, h)
+      const dataUrl = c.toDataURL('image/jpeg', JPEG_QUALITY)
+      resolve(dataUrl.replace(/^data:image\/\w+;base64,/, ''))
+    }
+    img.onerror = () => reject(new Error('Failed to load image for compression'))
+    img.src = src
+  })
+}
+
 // ── A4 guide rect calculation ──────────────────────────────────────────────
 function calculateA4Rect(viewW: number, viewH: number, padding: number) {
   const a4Ratio = 1 / 1.414
@@ -161,7 +188,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
   }, [open])
 
   // ── Capture photo with A4 crop ──────────────────────────────────────────
-  function capturePhoto() {
+  async function capturePhoto() {
     const video = videoRef.current
     const canvas = canvasRef.current
     const scanner = scannerRef.current
@@ -188,32 +215,42 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     const cropW = a4.width * scale
     const cropH = a4.height * scale
 
-    canvas.width = cropW
-    canvas.height = cropH
+    // Crop to A4 area, then resize to MAX_DIM
+    let w = cropW, h = cropH
+    if (w > MAX_DIM || h > MAX_DIM) {
+      const r = Math.min(MAX_DIM / w, MAX_DIM / h)
+      w = Math.round(w * r); h = Math.round(h * r)
+    }
+    canvas.width = w
+    canvas.height = h
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
+    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, w, h)
 
-    const base64 = canvas.toDataURL('image/jpeg', 0.85)
-    setPages(prev => [...prev, base64])
+    const dataUrl = canvas.toDataURL('image/jpeg', JPEG_QUALITY)
+    // Store data URL for thumbnails, strip prefix when sending
+    setPages(prev => [...prev, dataUrl])
 
     // Flash effect
     setFlashVisible(true)
     setTimeout(() => setFlashVisible(false), 150)
   }
 
-  // ── File upload (multi) ─────────────────────────────────────────────────
-  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+  // ── File upload (multi) — compress each file ─────────────────────────────
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = e.target.files
     if (!files || files.length === 0) return
 
-    Array.from(files).forEach(file => {
-      const reader = new FileReader()
-      reader.onload = () => {
-        setPages(prev => [...prev, reader.result as string])
-      }
-      reader.readAsDataURL(file)
-    })
+    for (const file of Array.from(files)) {
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.readAsDataURL(file)
+      })
+      // Resize + compress, then re-add prefix for thumbnail display
+      const raw = await compressImage(dataUrl)
+      setPages(prev => [...prev, `data:image/jpeg;base64,${raw}`])
+    }
     // Reset input so same files can be re-selected
     e.target.value = ''
   }
@@ -229,7 +266,9 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     setStep('parsing')
 
     try {
-      const result = await parseInvoice(pages)
+      // Strip data URL prefix — send raw base64 only
+      const rawImages = pages.map(p => p.replace(/^data:image\/\w+;base64,/, ''))
+      const result = await parseInvoice(rawImages)
       setSupplier(result.supplier || '')
       setInvoiceNumber(result.invoiceNumber || '')
 
