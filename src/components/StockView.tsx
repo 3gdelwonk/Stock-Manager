@@ -636,8 +636,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
     if (stockItems.length === 0 || imgStartedRef.current) return
     imgStartedRef.current = true
 
-    // Sort by priority (highest margin×velocity first) — queue-based Serper tracking
-    // in fetchAndCacheImage auto-decides Serper vs DDG per item
+    // Sort by priority (highest margin×velocity first) for JARVISmart DB sync
     const items = [...stockItems]
       .map(s => ({ ...s, _priority: computeImagePriority({ avgDayQty: s.avgDayQty, sellPrice: s.sellPrice, avgCost: s.avgCost }) }))
       .sort((a, b) => b._priority - a._priority)
@@ -944,13 +943,9 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
               imgProgress.creditsExhausted ? 'text-amber-700' : 'text-blue-700'
             }`}>
               <span className="truncate">
-                {imgProgress.creditsExhausted
-                  ? `Image search unavailable — ${imgProgress.total - imgProgress.done} products remaining. Check JARVISmart connection.`
-                  : imgDone
-                    ? `Done — ${imgProgress.found} new images saved${imgProgress.skipped ? `, ${imgProgress.skipped} already cached` : ''}`
-                    : imgProgress.phase === 'jarvis'
-                      ? `Syncing images from server: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`
-                      : `Searching images: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`}
+                {imgDone
+                    ? `Done — ${imgProgress.found} new images synced${imgProgress.skipped ? `, ${imgProgress.skipped} already cached` : ''}`
+                    : `Syncing images: ${imgProgress.done}/${imgProgress.total} (${imgProgress.found} found)`}
               </span>
               {!imgProgress.creditsExhausted && !imgDone && (
                 <span className="shrink-0 ml-2">{Math.round((imgProgress.done / Math.max(1, imgProgress.total)) * 100)}%</span>

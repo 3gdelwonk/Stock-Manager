@@ -34,7 +34,7 @@ interface ApplyResult {
 const MAX_DIM = 1400  // good resolution for OCR
 const JPEG_Q = 0.8    // high quality — server limit is 5MB
 
-/** Resize + convert to grayscale on a canvas. Returns the canvas. */
+/** Resize image on a canvas. Returns the canvas. */
 function processToCanvas(source: CanvasImageSource, srcW: number, srcH: number): HTMLCanvasElement {
   let w = srcW, h = srcH
   if (w > MAX_DIM || h > MAX_DIM) {
@@ -45,14 +45,6 @@ function processToCanvas(source: CanvasImageSource, srcW: number, srcH: number):
   c.width = w; c.height = h
   const ctx = c.getContext('2d')!
   ctx.drawImage(source, 0, 0, srcW, srcH, 0, 0, w, h)
-  // Convert to grayscale — invoices are B&W, this cuts size ~60% and improves OCR
-  const id = ctx.getImageData(0, 0, w, h)
-  const d = id.data
-  for (let i = 0; i < d.length; i += 4) {
-    const g = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
-    d[i] = d[i + 1] = d[i + 2] = g
-  }
-  ctx.putImageData(id, 0, 0)
   return c
 }
 
