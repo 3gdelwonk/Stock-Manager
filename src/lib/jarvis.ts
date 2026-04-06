@@ -1191,16 +1191,23 @@ export interface ParseInvoiceResponse {
 }
 
 export async function parseInvoice(imageBase64: string): Promise<ParseInvoiceResponse> {
+  const payload = JSON.stringify({ image: imageBase64 })
+  const payloadKB = (payload.length / 1024).toFixed(1)
+  console.log(`[parseInvoice] payload size: ${payloadKB} KB, base64 length: ${imageBase64.length}`)
+
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 30_000)
   try {
     const res = await fetch(`${getBaseUrl()}/api/pos/parse-invoice`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-API-Key': getApiKey() },
-      body: JSON.stringify({ image: imageBase64 }),
+      body: payload,
       signal: controller.signal,
     })
-    if (!res.ok) throw new Error(`Parse failed: ${res.status}`)
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '')
+      throw new Error(`Parse failed: ${res.status} (payload ${payloadKB}KB)${detail ? ' — ' + detail : ''}`)
+    }
     return (await res.json()) as ParseInvoiceResponse
   } finally {
     clearTimeout(timeout)
