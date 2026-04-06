@@ -1190,17 +1190,14 @@ export interface ParseInvoiceResponse {
   lines: ParsedInvoiceLine[]
 }
 
-export async function parseInvoice(imageBlob: Blob): Promise<ParseInvoiceResponse> {
-  const form = new FormData()
-  form.append('image', imageBlob, 'invoice.jpg')
-
+export async function parseInvoice(imageBase64: string): Promise<ParseInvoiceResponse> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 30_000)
   try {
     const res = await fetch(`${getBaseUrl()}/api/pos/parse-invoice`, {
       method: 'POST',
-      headers: { 'X-API-Key': getApiKey() },  // no Content-Type — browser sets multipart boundary
-      body: form,
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': getApiKey() },
+      body: JSON.stringify({ image: imageBase64 }),
       signal: controller.signal,
     })
     if (!res.ok) throw new Error(`Parse failed: ${res.status}`)

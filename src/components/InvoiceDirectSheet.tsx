@@ -31,8 +31,8 @@ interface ApplyResult {
 }
 
 // ── Image processing ───────────────────────────────────────────────────────
-const MAX_DIM = 1400  // good resolution for OCR
-const JPEG_Q = 0.7    // decent quality — grayscale keeps file small
+const MAX_DIM = 1200  // good resolution for OCR
+const JPEG_Q = 0.65   // decent quality — grayscale keeps file small
 
 /** Resize + convert to grayscale on a canvas. Returns the canvas. */
 function processToCanvas(source: CanvasImageSource, srcW: number, srcH: number): HTMLCanvasElement {
@@ -59,17 +59,6 @@ function processToCanvas(source: CanvasImageSource, srcW: number, srcH: number):
 /** Get a data URL (for thumbnails) from a processed canvas */
 function canvasToDataUrl(canvas: HTMLCanvasElement): string {
   return canvas.toDataURL('image/jpeg', JPEG_Q)
-}
-
-/** Get a Blob (for uploading via FormData) from a processed canvas */
-function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      blob => blob ? resolve(blob) : reject(new Error('Failed to create blob')),
-      'image/jpeg',
-      JPEG_Q,
-    )
-  })
 }
 
 /** Process an uploaded image: resize + grayscale, return data URL for display */
@@ -285,25 +274,14 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     setStep('parsing')
 
     try {
-      // Send pages one at a time as binary blobs via FormData (no base64 overhead)
+      // Send pages one at a time — grayscale images are small enough for JSON
       let allLines: ParsedInvoiceLine[] = []
       let detectedSupplier = ''
       let detectedInvoiceNumber = ''
 
       for (const page of pages) {
-        // Convert data URL back to a canvas, then to a binary blob
-        const blob = await new Promise<Blob>((resolve, reject) => {
-          const img = new Image()
-          img.onload = () => {
-            const c = document.createElement('canvas')
-            c.width = img.naturalWidth; c.height = img.naturalHeight
-            c.getContext('2d')!.drawImage(img, 0, 0)
-            canvasToBlob(c).then(resolve).catch(reject)
-          }
-          img.onerror = () => reject(new Error('Failed to prepare image'))
-          img.src = page
-        })
-        const result = await parseInvoice(blob)
+        const raw = page.replace(/^data:image\/\w+;base64,/, '')
+        const result = await parseInvoice(raw)
         if (result.supplier && !detectedSupplier) detectedSupplier = result.supplier
         if (result.invoiceNumber && !detectedInvoiceNumber) detectedInvoiceNumber = result.invoiceNumber
         if (result.lines) allLines = allLines.concat(result.lines)
