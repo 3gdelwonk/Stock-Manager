@@ -354,11 +354,14 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
       let detectedSupplier = ''
       let detectedInvoiceNumber = ''
 
-      for (const page of pages) {
-        // Strip data URL prefix — Anthropic API needs raw base64 only
-        const raw = page.replace(/^data:image\/\w+;base64,/, '')
+      let serverDebug = ''
+
+      for (let pi = 0; pi < pages.length; pi++) {
+        const raw = pages[pi].replace(/^data:image\/\w+;base64,/, '')
         const result = await parseInvoice(raw)
-        console.log('[InvoiceDirectSheet] parseInvoice response:', JSON.stringify(result).slice(0, 500))
+        const snippet = JSON.stringify(result).slice(0, 300)
+        serverDebug += `Page ${pi + 1}: ${snippet}\n`
+
         if (result.supplier && !detectedSupplier) detectedSupplier = result.supplier
         if (result.invoiceNumber && !detectedInvoiceNumber) detectedInvoiceNumber = result.invoiceNumber
         if (result.lines) allLines = allLines.concat(result.lines)
@@ -368,7 +371,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
       setInvoiceNumber(detectedInvoiceNumber)
 
       if (allLines.length === 0) {
-        setError('No items found in invoice. Check the console (F12) for the server response.')
+        setError(`No items parsed from invoice.\n\nServer response:\n${serverDebug}\n\nTip: Crop to just the line items table, ensure good lighting, and try again.`)
         setStep('capture')
         return
       }
@@ -725,8 +728,8 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
             <>
               {error && (
                 <div className="flex items-center gap-2 px-3 py-2 bg-red-50 rounded-lg">
-                  <AlertCircle size={14} className="text-red-500 shrink-0" />
-                  <p className="text-xs text-red-600">{error}</p>
+                  <AlertCircle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-red-600 whitespace-pre-wrap break-all">{error}</p>
                 </div>
               )}
 
