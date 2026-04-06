@@ -30,45 +30,57 @@ interface ApplyResult {
   message?: string
 }
 
-// ── Image compression ──────────────────────────────────────────────────────
-const MAX_DIM = 1000       // max pixels on longest side
-const MAX_BASE64 = 60_000  // ~60KB base64 cap per image (well under 100KB JSON limit)
+// ── Image processing ───────────────────────────────────────────────────────
+const MAX_DIM = 1400  // good resolution for OCR
+const JPEG_Q = 0.7    // decent quality — grayscale keeps file small
 
-/** Draw image/canvas source onto a canvas at target dimensions */
-function drawToCanvas(source: CanvasImageSource, sw: number, sh: number, tw: number, th: number): HTMLCanvasElement {
+/** Resize + convert to grayscale on a canvas. Returns the canvas. */
+function processToCanvas(source: CanvasImageSource, srcW: number, srcH: number): HTMLCanvasElement {
+  let w = srcW, h = srcH
+  if (w > MAX_DIM || h > MAX_DIM) {
+    const r = Math.min(MAX_DIM / w, MAX_DIM / h)
+    w = Math.round(w * r); h = Math.round(h * r)
+  }
   const c = document.createElement('canvas')
-  c.width = tw; c.height = th
+  c.width = w; c.height = h
   const ctx = c.getContext('2d')!
-  ctx.drawImage(source, 0, 0, sw, sh, 0, 0, tw, th)
+  ctx.drawImage(source, 0, 0, srcW, srcH, 0, 0, w, h)
+  // Convert to grayscale — invoices are B&W, this cuts size ~60% and improves OCR
+  const id = ctx.getImageData(0, 0, w, h)
+  const d = id.data
+  for (let i = 0; i < d.length; i += 4) {
+    const g = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
+    d[i] = d[i + 1] = d[i + 2] = g
+  }
+  ctx.putImageData(id, 0, 0)
   return c
 }
 
-/** Encode a canvas to JPEG base64, iteratively reducing quality until under MAX_BASE64 */
-function canvasToCompressedBase64(canvas: HTMLCanvasElement): string {
-  for (let q = 0.5; q >= 0.15; q -= 0.1) {
-    const dataUrl = canvas.toDataURL('image/jpeg', q)
-    const raw = dataUrl.replace(/^data:image\/\w+;base64,/, '')
-    if (raw.length <= MAX_BASE64) return dataUrl
-  }
-  // Last resort: lowest quality
-  return canvas.toDataURL('image/jpeg', 0.1)
+/** Get a data URL (for thumbnails) from a processed canvas */
+function canvasToDataUrl(canvas: HTMLCanvasElement): string {
+  return canvas.toDataURL('image/jpeg', JPEG_Q)
 }
 
-/** Resize an image (data URL) and compress to fit under MAX_BASE64, returns full data URL */
-function compressImage(src: string): Promise<string> {
+/** Get a Blob (for uploading via FormData) from a processed canvas */
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      blob => blob ? resolve(blob) : reject(new Error('Failed to create blob')),
+      'image/jpeg',
+      JPEG_Q,
+    )
+  })
+}
+
+/** Process an uploaded image: resize + grayscale, return data URL for display */
+function processUploadedImage(src: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new Image()
     img.onload = () => {
-      let w = img.naturalWidth, h = img.naturalHeight
-      if (w > MAX_DIM || h > MAX_DIM) {
-        const ratio = Math.min(MAX_DIM / w, MAX_DIM / h)
-        w = Math.round(w * ratio)
-        h = Math.round(h * ratio)
-      }
-      const c = drawToCanvas(img, img.naturalWidth, img.naturalHeight, w, h)
-      resolve(canvasToCompressedBase64(c))
+      const c = processToCanvas(img, img.naturalWidth, img.naturalHeight)
+      resolve(canvasToDataUrl(c))
     }
-    img.onerror = () => reject(new Error('Failed to load image for compression'))
+    img.onerror = () => reject(new Error('Failed to load image'))
     img.src = src
   })
 }
@@ -231,20 +243,12 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     const cropW = a4.width * scale
     const cropH = a4.height * scale
 
-    // Crop to A4 area, then resize to MAX_DIM
-    let w = cropW, h = cropH
-    if (w > MAX_DIM || h > MAX_DIM) {
-      const r = Math.min(MAX_DIM / w, MAX_DIM / h)
-      w = Math.round(w * r); h = Math.round(h * r)
-    }
-    canvas.width = w
-    canvas.height = h
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, w, h)
-
-    // Iteratively compress until under size limit
-    const dataUrl = canvasToCompressedBase64(canvas)
+    // Crop to A4 area on a temp canvas, then process (resize + grayscale)
+    const tmp = document.createElement('canvas')
+    tmp.width = cropW; tmp.height = cropH
+    tmp.getContext('2d')!.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
+    const processed = processToCanvas(tmp, cropW, cropH)
+    const dataUrl = canvasToDataUrl(processed)
     setPages(prev => [...prev, dataUrl])
 
     // Flash effect
@@ -263,8 +267,8 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
         reader.onload = () => resolve(reader.result as string)
         reader.readAsDataURL(file)
       })
-      const compressed = await compressImage(dataUrl)
-      setPages(prev => [...prev, compressed])
+      const processed = await processUploadedImage(dataUrl)
+      setPages(prev => [...prev, processed])
     }
     // Reset input so same files can be re-selected
     e.target.value = ''
@@ -281,14 +285,25 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
     setStep('parsing')
 
     try {
-      // Send pages one at a time to avoid 413 payload too large
+      // Send pages one at a time as binary blobs via FormData (no base64 overhead)
       let allLines: ParsedInvoiceLine[] = []
       let detectedSupplier = ''
       let detectedInvoiceNumber = ''
 
       for (const page of pages) {
-        const raw = page.replace(/^data:image\/\w+;base64,/, '')
-        const result = await parseInvoice([raw])
+        // Convert data URL back to a canvas, then to a binary blob
+        const blob = await new Promise<Blob>((resolve, reject) => {
+          const img = new Image()
+          img.onload = () => {
+            const c = document.createElement('canvas')
+            c.width = img.naturalWidth; c.height = img.naturalHeight
+            c.getContext('2d')!.drawImage(img, 0, 0)
+            canvasToBlob(c).then(resolve).catch(reject)
+          }
+          img.onerror = () => reject(new Error('Failed to prepare image'))
+          img.src = page
+        })
+        const result = await parseInvoice(blob)
         if (result.supplier && !detectedSupplier) detectedSupplier = result.supplier
         if (result.invoiceNumber && !detectedInvoiceNumber) detectedInvoiceNumber = result.invoiceNumber
         if (result.lines) allLines = allLines.concat(result.lines)
