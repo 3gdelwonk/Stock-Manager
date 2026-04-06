@@ -19,6 +19,7 @@ interface MatchedLine {
   manualSearchQuery?: string
   manualSearchResults?: StockItem[]
   manualSearching?: boolean
+  manualSearchError?: string
 }
 
 interface ApplyResult {
@@ -433,26 +434,47 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
 
   // ── Manual re-match ─────────────────────────────────────────────────────
   function toggleManualSearch(index: number) {
+    const line = lines[index]
+    const isOpening = !line.manualSearchOpen
+    // Use first 2-3 keywords as initial query (strip sizes/weights)
+    const defaultQuery = line.parsed.description
+      .replace(/\d+\s*(kg|g|ml|l|pk|pack|x)\b/gi, '')
+      .trim()
+      .split(/[\s\-,]+/)
+      .filter(w => w.length > 1)
+      .slice(0, 3)
+      .join(' ')
+
     setLines(prev => prev.map((l, i) => i === index
-      ? { ...l, manualSearchOpen: !l.manualSearchOpen, manualSearchQuery: l.manualSearchQuery || l.parsed.description }
+      ? { ...l, manualSearchOpen: !l.manualSearchOpen, manualSearchQuery: l.manualSearchQuery || defaultQuery || l.parsed.description }
       : l
     ))
+
+    // Auto-search when opening
+    if (isOpening) {
+      setTimeout(() => doManualSearch(index), 50)
+    }
   }
 
   async function doManualSearch(index: number) {
+    // Read latest state
     const line = lines[index]
-    if (!line.manualSearchQuery?.trim()) return
+    const query = line?.manualSearchQuery?.trim() || line?.parsed.description
+    if (!query) return
 
-    setLines(prev => prev.map((l, i) => i === index ? { ...l, manualSearching: true } : l))
+    setLines(prev => prev.map((l, i) => i === index ? { ...l, manualSearching: true, manualSearchError: undefined } : l))
 
     try {
-      const res = await searchItems(line.manualSearchQuery!.trim(), 20)
+      const res = await searchItems(query, 20)
       setLines(prev => prev.map((l, i) => i === index
         ? { ...l, manualSearchResults: res.items, manualSearching: false }
         : l
       ))
-    } catch {
-      setLines(prev => prev.map((l, i) => i === index ? { ...l, manualSearching: false } : l))
+    } catch (e) {
+      setLines(prev => prev.map((l, i) => i === index
+        ? { ...l, manualSearching: false, manualSearchError: (e as Error).message, manualSearchResults: [] }
+        : l
+      ))
     }
   }
 
@@ -1006,7 +1028,10 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                             ))}
                           </div>
                         )}
-                        {line.manualSearchResults && line.manualSearchResults.length === 0 && (
+                        {line.manualSearchError && (
+                          <p className="text-xs text-red-500">Search error: {line.manualSearchError}</p>
+                        )}
+                        {!line.manualSearchError && line.manualSearchResults && line.manualSearchResults.length === 0 && (
                           <p className="text-xs text-gray-400">No results found — try different keywords</p>
                         )}
                       </div>
