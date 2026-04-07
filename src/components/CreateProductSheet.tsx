@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { X, ChevronRight, ChevronLeft, Check, Loader2, Plus, Printer } from 'lucide-react'
+import { X, ChevronRight, ChevronLeft, Check, Loader2, Plus, Printer, ScanLine } from 'lucide-react'
+import BarcodeScanner from './BarcodeScanner'
 import {
   searchItems,
   getDepartmentList,
@@ -64,6 +65,7 @@ export default function CreateProductSheet({
   const [printError, setPrintError] = useState('')
 
   const [error, setError] = useState('')
+  const [scannerOpen, setScannerOpen] = useState(false)
 
   // Fetch departments on mount
   useEffect(() => {
@@ -238,19 +240,28 @@ export default function CreateProductSheet({
           <div className="space-y-4">
             <div className="space-y-1">
               <label className="text-xs text-gray-500">Barcode</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                autoFocus
-                value={form.barcode}
-                onChange={(e) => {
-                  setForm((f) => ({ ...f, barcode: e.target.value }))
-                  setExistsWarning(false)
-                  setError('')
-                }}
-                placeholder="Scan or enter barcode"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoFocus
+                  value={form.barcode}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, barcode: e.target.value }))
+                    setExistsWarning(false)
+                    setError('')
+                  }}
+                  placeholder="Enter barcode"
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300"
+                />
+                <button
+                  onClick={() => setScannerOpen(true)}
+                  className="px-3 py-2 bg-emerald-600 text-white rounded-lg flex items-center gap-1.5 text-sm font-medium hover:bg-emerald-700 transition-colors"
+                >
+                  <ScanLine size={16} />
+                  Scan
+                </button>
+              </div>
               {error && <p className="text-xs text-red-600">{error}</p>}
             </div>
 
@@ -520,6 +531,17 @@ export default function CreateProductSheet({
           </div>
         )}
       </div>
+
+      <BarcodeScanner
+        open={scannerOpen}
+        onScan={(barcode) => {
+          setScannerOpen(false)
+          setForm((f) => ({ ...f, barcode }))
+          setExistsWarning(false)
+          setError('')
+        }}
+        onClose={() => setScannerOpen(false)}
+      />
     </div>
   )
 }
