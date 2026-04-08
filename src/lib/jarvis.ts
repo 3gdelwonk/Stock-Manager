@@ -163,6 +163,9 @@ interface RawStockItem {
   AvgDayQty: number
   AvgWeekQty: number
   barcode: string | null
+  Active?: boolean
+  active?: boolean
+  IsActive?: boolean
 }
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -221,6 +224,7 @@ export interface StockItem {
   isOnReorder: boolean
   avgDayQty: number | null
   avgWeekQty: number | null
+  active?: boolean
 }
 
 export interface LivePromotion {
@@ -408,6 +412,7 @@ export async function getStockLevels(filters: StockFilters = {}): Promise<StockI
       isOnReorder:    s.IsOnReorder,
       avgDayQty:      s.AvgDayQty,
       avgWeekQty:     s.AvgWeekQty,
+      active:         s.Active ?? s.active ?? s.IsActive,
     }))
 }
 
@@ -429,6 +434,7 @@ export async function searchItems(query: string, limit = 20): Promise<SearchResu
       isOnReorder:    s.IsOnReorder ?? false,
       avgDayQty:      s.AvgDayQty ?? null,
       avgWeekQty:     s.AvgWeekQty ?? null,
+      active:         s.Active ?? s.active ?? s.IsActive,
     })),
     total: raw.count ?? 0,
   }

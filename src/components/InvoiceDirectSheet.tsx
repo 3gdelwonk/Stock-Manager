@@ -927,6 +927,9 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                             {line.match && (
                               <span className="text-[10px] px-1 py-0.5 bg-gray-100 rounded">{line.match.department}</span>
                             )}
+                            {line.match?.active === false && (
+                              <span className="text-[9px] font-bold px-1 py-0.5 bg-red-100 text-red-700 rounded">INACTIVE</span>
+                            )}
                             {(line.parsed.qty ?? 0) > 0 && (
                               <span className="text-[10px] px-1 py-0.5 bg-blue-50 text-blue-700 rounded">Qty: {line.parsed.qty}</span>
                             )}
@@ -1023,6 +1026,7 @@ export default function InvoiceDirectSheet({ open, onClose }: Props) {
                                   <span className="text-[10px] px-1 py-0.5 bg-gray-100 rounded">{item.department}</span>
                                   <span>${item.sellPrice.toFixed(2)}</span>
                                   {item.barcode && <span className="text-gray-400">{item.barcode}</span>}
+                                  {item.active === false && <span className="text-[9px] font-bold px-1 py-0.5 bg-red-100 text-red-700 rounded">INACTIVE</span>}
                                 </div>
                               </button>
                             ))}

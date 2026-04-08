@@ -14,6 +14,7 @@ interface PriceChangeModalProps {
   currentPrice: number
   prefillPrice?: number
   prefillReason?: TrackedItem['reason']
+  active?: boolean
   onClose: () => void
   onSuccess?: () => void
 }
@@ -27,6 +28,7 @@ export default function PriceChangeModal({
   currentPrice,
   prefillPrice,
   prefillReason,
+  active,
   onClose,
   onSuccess,
 }: PriceChangeModalProps) {
@@ -151,9 +153,16 @@ export default function PriceChangeModal({
         {/* 2. Product name + department badge */}
         <div>
           <p className="text-sm font-medium text-gray-900">{description}</p>
-          <span className="inline-block mt-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
-            {department}
-          </span>
+          <div className="flex items-center gap-1.5 mt-1">
+            <span className="inline-block text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+              {department}
+            </span>
+            {active === false && (
+              <span className="inline-block text-xs font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+                INACTIVE
+              </span>
+            )}
+          </div>
         </div>
 
         {/* 3. Current Price (read-only) */}

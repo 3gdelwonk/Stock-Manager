@@ -214,6 +214,9 @@ const StockCard = memo(function StockCard({
               {stock.isOnReorder && (
                 <span className="text-[9px] font-bold px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded-full">REORDER</span>
               )}
+              {stock.active === false && (
+                <span className="text-[9px] font-bold px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full">INACTIVE</span>
+              )}
             </div>
           </div>
           <div className="text-gray-400 shrink-0 mt-1">
@@ -1093,6 +1096,7 @@ export default function StockView({ initialAction, onActionConsumed }: StockView
         description={priceTarget?.description ?? ''}
         department={priceTarget?.department ?? ''}
         currentPrice={priceTarget?.sellPrice ?? 0}
+        active={priceTarget?.active}
         onClose={() => setPriceTarget(null)}
         onSuccess={() => { setPriceTarget(null); fetchData(true) }}
       />
