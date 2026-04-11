@@ -44,7 +44,6 @@ class GroceryManagerDB extends Dexie {
   quickActionLog!: EntityTable<QuickActionLogEntry, 'id'>
   barcodeAliases!: EntityTable<BarcodeAlias, 'barcode'>
   connectionLog!: EntityTable<ConnectionLogEntry, 'id'>
-
   constructor() {
     super('GroceryManagerDB')
     this.version(1).stores({
@@ -106,7 +105,8 @@ export async function clearAllData(): Promise<void> {
       db.trackedItems.clear(), db.trackedPromos.clear(), db.importLog.clear(),
       db.imageCache.clear(), db.promoROICache.clear(), db.serperSearched.clear(),
       db.insights.clear(), db.calendarEvents.clear(), db.gmailExtractions.clear(),
-      db.suppliers.clear(), db.quickActionLog.clear(), db.barcodeAliases.clear(), db.connectionLog.clear(),
+      db.suppliers.clear(), db.quickActionLog.clear(), db.barcodeAliases.clear(),
+      db.connectionLog.clear(),
     ])
   })
 }

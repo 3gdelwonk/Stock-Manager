@@ -6,7 +6,7 @@ import SIMobileMenu from './components/si/SIMobileMenu'
 import ExpiryWatch from './components/si/ExpiryWatch'
 import QuickStock from './components/si/QuickStock'
 import CalendarView from './components/si/CalendarView'
-import InsightsPlaceholder from './components/si/InsightsPlaceholder'
+import InsightsView from './components/si/InsightsView'
 import GmailScoutPlaceholder from './components/si/GmailScoutPlaceholder'
 import AuditView from './components/si/AuditView'
 import CustomerManager from './components/si/CustomerManager'
@@ -73,7 +73,7 @@ export default function SIApp() {
   const content = (() => {
     switch (activeView) {
       case 'expiry': return <ExpiryWatch />
-      case 'insights': return <InsightsPlaceholder />
+      case 'insights': return <InsightsView />
       case 'quickstock': return <QuickStock />
       case 'calendar': return <CalendarView />
       case 'gmail': return <GmailScoutPlaceholder />

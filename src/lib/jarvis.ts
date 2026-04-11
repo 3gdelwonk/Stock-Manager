@@ -1303,14 +1303,14 @@ export interface ItemLocation {
   [key: string]: unknown
 }
 
+// ── Location functions ───────────────────────────────────────────────────────
+
 export async function getLocationTypes(): Promise<LocationType[]> {
-  const data = await jarvisFetch<LocationType[] | { types: LocationType[] }>('/api/pos/location-types')
-  return Array.isArray(data) ? data : data.types
+  return jarvisFetch<LocationType[]>('/api/pos/location-types')
 }
 
 export async function getLocations(): Promise<StoreLocation[]> {
-  const data = await jarvisFetch<StoreLocation[] | { locations: StoreLocation[] }>('/api/pos/locations')
-  return Array.isArray(data) ? data : data.locations
+  return jarvisFetch<StoreLocation[]>('/api/pos/locations')
 }
 
 export async function createLocation(body: {
@@ -1326,55 +1326,33 @@ export async function updateLocation(id: number, body: {
 }
 
 export async function deleteLocation(id: number): Promise<{ success: boolean }> {
-  const url = `${getBaseUrl()}/api/pos/locations/${id}`
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
-  try {
-    const res = await fetch(url, {
-      method: 'DELETE',
-      headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
-      signal: controller.signal,
-    })
-    if (!res.ok) throw new Error(`JARVISmart ${res.status}: ${res.statusText}`)
-    return res.json()
-  } finally {
-    clearTimeout(timeout)
-  }
+  const res = await fetch(`${getBaseUrl()}/api/pos/locations/${id}`, {
+    method: 'DELETE',
+    headers: { 'X-API-Key': getApiKey() },
+  })
+  if (!res.ok) throw new Error(`JARVISmart ${res.status}: ${res.statusText}`)
+  return res.json()
 }
 
 export async function getItemLocations(itemCode: string): Promise<ItemLocation[]> {
-  const data = await jarvisFetch<ItemLocation[] | { locations: ItemLocation[] }>(
-    `/api/pos/locations/item/${encodeURIComponent(itemCode)}`
-  )
-  return Array.isArray(data) ? data : data.locations
+  return jarvisFetch<ItemLocation[]>(`/api/pos/locations/item/${encodeURIComponent(itemCode)}`)
 }
 
 export async function getLocationItems(locationId: number): Promise<LocationItem[]> {
-  const data = await jarvisFetch<LocationItem[] | { items: LocationItem[] }>(
-    `/api/pos/locations/${locationId}/items`
-  )
-  return Array.isArray(data) ? data : data.items
+  return jarvisFetch<LocationItem[]>(`/api/pos/locations/${locationId}/items`)
 }
 
 export async function assignItemToLocation(locationId: number, itemCode: string): Promise<{ success: boolean }> {
-  return jarvisMutate(`/api/pos/locations/${locationId}/items`, 'POST', { itemCode })
+  return jarvisMutate<{ success: boolean }>(`/api/pos/locations/${locationId}/items`, 'POST', { itemCode })
 }
 
 export async function removeItemFromLocation(locationId: number, itemCode: string): Promise<{ success: boolean }> {
-  const url = `${getBaseUrl()}/api/pos/locations/${locationId}/items/${encodeURIComponent(itemCode)}`
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT)
-  try {
-    const res = await fetch(url, {
-      method: 'DELETE',
-      headers: { 'X-API-Key': getApiKey(), 'Content-Type': 'application/json' },
-      signal: controller.signal,
-    })
-    if (!res.ok) throw new Error(`JARVISmart ${res.status}: ${res.statusText}`)
-    return res.json()
-  } finally {
-    clearTimeout(timeout)
-  }
+  const res = await fetch(`${getBaseUrl()}/api/pos/locations/${locationId}/items/${encodeURIComponent(itemCode)}`, {
+    method: 'DELETE',
+    headers: { 'X-API-Key': getApiKey() },
+  })
+  if (!res.ok) throw new Error(`JARVISmart ${res.status}: ${res.statusText}`)
+  return res.json()
 }
 
 export async function bulkAssignItems(locationId: number, itemCodes: string[]): Promise<{ success: boolean; assigned?: number }> {

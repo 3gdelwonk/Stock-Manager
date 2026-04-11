@@ -7,8 +7,32 @@ import {
   getLocationTypes, getLocations, createLocation, updateLocation, deleteLocation,
   getLocationItems, assignItemToLocation, removeItemFromLocation,
   bulkAssignItems, assignDepartmentToLocation, moveItemToLocation, bulkMoveItems,
+  searchItems,
   type LocationType, type StoreLocation, type LocationItem,
 } from '../lib/jarvis'
+
+// Resolve a user-entered code to an itemCode.
+// If it looks like a barcode (8+ digits, numeric) and JARVISmart finds a match
+// by barcode, return the matched itemCode. Otherwise return the code unchanged.
+async function resolveToItemCode(code: string): Promise<string> {
+  const trimmed = code.trim()
+  if (/^\d{8,}$/.test(trimmed)) {
+    try {
+      const result = await searchItems(trimmed, 1)
+      const match = result.items.find(
+        i => i.barcode === trimmed || i.barcode?.replace(/^0+/, '') === trimmed.replace(/^0+/, '')
+      )
+      if (match) return match.itemCode
+    } catch {
+      // If search fails, fall through and use the raw code
+    }
+  }
+  return trimmed
+}
+
+async function resolveCodes(codes: string[]): Promise<string[]> {
+  return Promise.all(codes.map(resolveToItemCode))
+}
 
 interface Props {
   open: boolean
@@ -188,7 +212,8 @@ export default function StoreLocationManager({ open, onClose }: Props) {
     setAssigning(true)
     setAssignResult(null)
     try {
-      await assignItemToLocation(selected.id, assignQuery.trim())
+      const itemCode = await resolveToItemCode(assignQuery.trim())
+      await assignItemToLocation(selected.id, itemCode)
       const items = await getLocationItems(selected.id)
       setSelectedItems(items)
       setAssignQuery('')
@@ -201,11 +226,12 @@ export default function StoreLocationManager({ open, onClose }: Props) {
 
   async function handleBulkAssign() {
     if (!selected || !assignQuery.trim()) return
-    const codes = assignQuery.split(/[,\s]+/).map(c => c.trim()).filter(Boolean)
-    if (codes.length === 0) return
+    const raw = assignQuery.split(/[,\s]+/).map(c => c.trim()).filter(Boolean)
+    if (raw.length === 0) return
     setAssigning(true)
     setAssignResult(null)
     try {
+      const codes = await resolveCodes(raw)
       const res = await bulkAssignItems(selected.id, codes)
       const items = await getLocationItems(selected.id)
       setSelectedItems(items)
@@ -235,11 +261,12 @@ export default function StoreLocationManager({ open, onClose }: Props) {
 
   async function handleMoveItems() {
     if (!selected || !assignQuery.trim()) return
-    const codes = assignQuery.split(/[,\s]+/).map(c => c.trim()).filter(Boolean)
-    if (codes.length === 0) return
+    const raw = assignQuery.split(/[,\s]+/).map(c => c.trim()).filter(Boolean)
+    if (raw.length === 0) return
     setAssigning(true)
     setAssignResult(null)
     try {
+      const codes = await resolveCodes(raw)
       if (codes.length === 1) {
         await moveItemToLocation(selected.id, codes[0])
       } else {
@@ -540,7 +567,7 @@ export default function StoreLocationManager({ open, onClose }: Props) {
                     ) : (
                       <div className="space-y-0.5 max-h-48 overflow-auto">
                         {selectedItems.map(item => (
-                          <div key={item.itemCode} className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-gray-50 group">
+                          <div key={item.itemCode + '|' + (item.barcode ?? '')} className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-gray-50 group">
                             <div className="min-w-0 flex-1">
                               <p className="text-xs font-medium text-gray-800 truncate">{item.description || item.itemCode}</p>
                               <div className="flex items-center gap-2 text-[10px] text-gray-400">

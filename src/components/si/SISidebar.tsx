@@ -14,7 +14,7 @@ const NAV_SECTIONS: { label: string; items: { id: SIView; label: string; icon: t
     items: [
       { id: 'stock', label: 'Stock Browser', icon: Warehouse },
       { id: 'expiry', label: 'Expiry Watch', icon: Clock },
-      { id: 'insights', label: 'Insights', icon: Lightbulb, badge: 'P2' },
+      { id: 'insights', label: 'Insights', icon: Lightbulb },
       { id: 'audit', label: 'Audit Trail', icon: ClipboardList },
     ],
   },

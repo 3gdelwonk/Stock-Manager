@@ -6,6 +6,15 @@ import { resolve } from 'path'
 
 export default defineConfig({
   base: './',
+  server: {
+    proxy: {
+      '/abs-api': {
+        target: 'https://data.api.abs.gov.au/rest',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/abs-api/, ''),
+      },
+    },
+  },
   build: {
     target: ['es2020', 'safari15'],
     rollupOptions: {
