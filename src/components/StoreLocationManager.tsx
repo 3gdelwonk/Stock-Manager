@@ -11,27 +11,50 @@ import {
   type LocationType, type StoreLocation, type LocationItem,
 } from '../lib/jarvis'
 
-// Resolve a user-entered code to an itemCode.
-// If it looks like a barcode (8+ digits, numeric) and JARVISmart finds a match
-// by barcode, return the matched itemCode. Otherwise return the code unchanged.
+// Resolve any user-entered code (barcode or itemCode) to a confirmed itemCode
+// using the same JARVISmart search endpoint as the product search bar.
+// Resolution priority:
+//   1. Exact itemCode match — user typed a known itemCode directly
+//   2. Exact barcode match (leading-zero tolerant) — full barcode scan/entry
+//   3. Single result returned — server matched unambiguously; trust it even if
+//      the barcode field is null in the response (server matched in SQL)
+//   4. Multiple ambiguous results with no exact match — pass through unchanged
+//   5. No results / search error — pass through unchanged, let server handle
 async function resolveToItemCode(code: string): Promise<string> {
   const trimmed = code.trim()
-  if (/^\d{8,}$/.test(trimmed)) {
-    try {
-      const result = await searchItems(trimmed, 1)
-      const match = result.items.find(
-        i => i.barcode === trimmed || i.barcode?.replace(/^0+/, '') === trimmed.replace(/^0+/, '')
-      )
-      if (match) return match.itemCode
-    } catch {
-      // If search fails, fall through and use the raw code
-    }
+  if (!trimmed) return trimmed
+  try {
+    const result = await searchItems(trimmed, 5)
+    if (result.items.length === 0) return trimmed
+
+    const norm = (s: string) => s.replace(/^0+/, '')
+
+    // 1. Exact itemCode match
+    const byItemCode = result.items.find(i => i.itemCode === trimmed)
+    if (byItemCode) return byItemCode.itemCode
+
+    // 2. Exact barcode match (with leading-zero normalisation)
+    const byBarcode = result.items.find(
+      i => i.barcode === trimmed || (i.barcode && norm(i.barcode) === norm(trimmed))
+    )
+    if (byBarcode) return byBarcode.itemCode
+
+    // 3. Single unambiguous result — JARVISmart already matched it server-side
+    if (result.items.length === 1) return result.items[0].itemCode
+
+    // 4. Multiple results, no exact match — pass through unchanged
+    return trimmed
+  } catch {
+    // Search failed — pass through, let the server accept or reject
+    return trimmed
   }
-  return trimmed
 }
 
+// Resolve all codes and deduplicate — prevents the same itemCode appearing
+// twice when different barcodes map to the same product.
 async function resolveCodes(codes: string[]): Promise<string[]> {
-  return Promise.all(codes.map(resolveToItemCode))
+  const resolved = await Promise.all(codes.map(resolveToItemCode))
+  return [...new Set(resolved)]
 }
 
 interface Props {
@@ -236,7 +259,9 @@ export default function StoreLocationManager({ open, onClose }: Props) {
       const items = await getLocationItems(selected.id)
       setSelectedItems(items)
       setAssignQuery('')
-      setAssignResult(`${res.assigned ?? codes.length} items assigned`)
+      const assigned = res.assigned ?? codes.length
+      const skipped = codes.length - assigned
+      setAssignResult(skipped > 0 ? `${assigned} assigned (${skipped} already there)` : `${assigned} items assigned`)
     } catch (e) {
       setError((e as Error).message)
     }
@@ -252,7 +277,8 @@ export default function StoreLocationManager({ open, onClose }: Props) {
       const items = await getLocationItems(selected.id)
       setSelectedItems(items)
       setAssignQuery('')
-      setAssignResult(`${res.assigned ?? 'All'} items from ${assignQuery.trim()} assigned`)
+      const deptAssigned = res.assigned ?? 0
+      setAssignResult(deptAssigned === 0 ? `All items already in this location` : `${deptAssigned} items from ${assignQuery.trim()} assigned`)
     } catch (e) {
       setError((e as Error).message)
     }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { X, Camera, ScanBarcode, Loader2, AlertCircle } from 'lucide-react'
-import { Html5Qrcode } from 'html5-qrcode'
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 import { db } from '../lib/db'
 import { searchItems, identifyProduct } from '../lib/jarvis'
 
@@ -108,13 +108,36 @@ export default function SmartScanner({
     setStatus({ kind: 'idle' })
     activeRef.current = true
 
-    const scanner = new Html5Qrcode('smart-barcode-reader')
+    const scanner = new Html5Qrcode('smart-barcode-reader', {
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.ITF,
+        Html5QrcodeSupportedFormats.QR_CODE,
+      ],
+      verbose: false,
+    })
     scannerRef.current = scanner
 
     scanner
       .start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 200 } },
+        {
+          fps: 15,
+          qrbox: { width: 300, height: 150 },
+          aspectRatio: 1.7778,
+          disableFlip: true,
+          videoConstraints: {
+            width:     { min: 640, ideal: 1920 },
+            height:    { min: 480, ideal: 1080 },
+            frameRate: { ideal: 30 },
+          } as MediaTrackConstraints,
+        },
         (decodedText) => {
           if (!activeRef.current) return
           activeRef.current = false
