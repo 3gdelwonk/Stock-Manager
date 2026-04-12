@@ -7,11 +7,6 @@
 const DEFAULT_URL = 'https://api.jarvismart196410.uk'
 const DEFAULT_KEY = 'jmart_sk_7f3a9c2e1b4d8f6a0e5c3b9d'
 
-/** Liquor department names excluded from the entire app */
-const EXCLUDED_DEPTS = new Set(['LIQUEURS', 'WINE', 'SPIRITS', 'LIQUOR/MISC', 'BEER'])
-function isLiquor(dept: string): boolean {
-  return EXCLUDED_DEPTS.has(dept.toUpperCase().trim())
-}
 
 function safeGetItem(key: string): string | null {
   try { return localStorage.getItem(key) } catch { return null }
@@ -355,7 +350,6 @@ export async function getDepartmentBreakdown(period: 'today' | 'week' | 'month' 
     `/api/pos/departments?period=${encodeURIComponent(period)}`
   )
   return raw.departments
-    .filter(d => !isLiquor(d.name))
     .map(d => ({
       code:            d.code,
       department:      d.name,
@@ -374,7 +368,6 @@ export async function getTopSellers(days = 7, limit = 20): Promise<TopSeller[]> 
     `/api/pos/top-sellers?days=${days}&limit=${limit}`
   )
   return raw.items
-    .filter(t => !isLiquor(t.department))
     .map(t => ({
       rank:          t.rank,
       itemCode:      t.itemCode,
@@ -397,7 +390,6 @@ export async function getStockLevels(filters: StockFilters = {}): Promise<StockI
     `/api/pos/stock${qs ? '?' + qs : ''}`
   )
   return raw.items
-    .filter(s => !isLiquor(s.DepartmentName))
     .map(s => ({
       itemCode:       s.ItemCode,
       barcode:        s.barcode ?? null,
@@ -420,10 +412,7 @@ export async function searchItems(query: string, limit = 20): Promise<SearchResu
   const params = new URLSearchParams({ q: query, limit: String(limit) })
   const raw = await jarvisFetch<{ items: RawStockItem[]; count: number }>(`/api/pos/search?${params}`)
   return {
-    // Apply the same liquor exclusion as getStockLevels so both search paths
-    // return an identical product set — no item visible in one but not the other.
     items: (raw.items || [])
-      .filter(s => !isLiquor(s.DepartmentName))
       .map(s => ({
         itemCode:       s.ItemCode,
         barcode:        s.barcode ?? (s as unknown as Record<string, string>).BarCode ?? null,
