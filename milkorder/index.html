@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>IGA Milk Manager</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="./manifest-icon-192.png" />
+    <link rel="apple-touch-icon" href="./manifest-icon-192.png" />
+    <script type="module" crossorigin src="../assets/milkorder-dlgjmqQg.js"></script>
+    <link rel="modulepreload" crossorigin href="../assets/vendor-BvRElZVo.js">
+    <link rel="modulepreload" crossorigin href="../assets/x-BMxVRt27.js">
+    <link rel="modulepreload" crossorigin href="../assets/wifi-Dumwovq3.js">
+    <link rel="modulepreload" crossorigin href="../assets/papaparse.min-D84PKcmZ.js">
+    <link rel="modulepreload" crossorigin href="../assets/mail-DJB4G42g.js">
+    <link rel="modulepreload" crossorigin href="../assets/xlsx-DrY1L0Dj.js">
+    <link rel="stylesheet" crossorigin href="../assets/x-D8abQyRU.css">
+  <link rel="manifest" href="./manifest.webmanifest"></head>
+  <body>
+    <noscript><p style="padding:2rem;text-align:center;font-family:system-ui">JavaScript is required to run this app.</p></noscript>
+    <div id="root"></div>
+    <script>
+      window.onerror = function(msg, src, line) {
+        var r = document.getElementById('root');
+        if (r && !r.children.length) {
+          r.innerHTML = '<div style="padding:1.5rem;font-family:system-ui;font-size:14px">'
+            + '<p style="color:#dc2626;font-weight:600">App failed to load</p>'
+            + '<p style="color:#666;margin-top:8px;word-break:break-all">' + msg + '</p>'
+            + '<p style="color:#999;margin-top:4px;font-size:12px">' + (src||'') + ':' + (line||'') + '</p>'
+            + '<button onclick="location.reload()" style="margin-top:12px;padding:8px 16px;background:#2563eb;color:#fff;border:none;border-radius:8px;font-size:14px">Reload</button>'
+            + '</div>';
+        }
+      };
+      window.onunhandledrejection = function(e) {
+        var msg = e.reason ? (e.reason.message || String(e.reason)) : 'Promise rejected';
+        window.onerror(msg, '', 0, 0, e.reason);
+      };
+      setTimeout(function() {
+        var r = document.getElementById('root');
+        if (r && !r.children.length && 'serviceWorker' in navigator) {
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            if (regs.length) {
+              regs.forEach(function(reg) { reg.unregister(); });
+              location.reload();
+            }
+          });
+        }
+      }, 5000);
+      if (!Array.prototype.at) {
+        Array.prototype.at = function(n) { n = Math.trunc(n) || 0; if (n < 0) n += this.length; return this[n]; };
+        String.prototype.at = function(n) { n = Math.trunc(n) || 0; if (n < 0) n += this.length; return this[n]; };
+      }
+      if (!Object.hasOwn) {
+        Object.hasOwn = function(o, p) { return Object.prototype.hasOwnProperty.call(o, p); };
+      }
+      if (typeof structuredClone === 'undefined') {
+        window.structuredClone = function(v) { return JSON.parse(JSON.stringify(v)); };
+      }
+      if (!crypto.randomUUID) {
+        crypto.randomUUID = function() {
+          return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, function(c) {
+            return (+c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> +c / 4).toString(16);
+          });
+        };
+      }
+      if (!AbortSignal.timeout) {
+        AbortSignal.timeout = function(ms) {
+          var c = new AbortController(); setTimeout(function() { c.abort(new DOMException('TimeoutError','TimeoutError')); }, ms); return c.signal;
+        };
+      }
+    </script>
+  </body>
+</html>
