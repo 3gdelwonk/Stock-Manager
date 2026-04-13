@@ -1,7 +1,7 @@
 /// <reference types="vite-plugin-pwa/react" />
 import { Component, useState, useEffect, type ReactNode } from 'react'
 import { useRegisterSW } from 'virtual:pwa-register/react'
-import { LayoutDashboard, Warehouse, Clock, BarChart2, Lightbulb, Settings } from 'lucide-react'
+import { LayoutDashboard, Warehouse, Clock, BarChart2, Lightbulb, MoreHorizontal, Settings } from 'lucide-react'
 import { useConnectionMonitor } from './lib/useConnectionMonitor'
 import ConnectionStatusBadge from './components/ConnectionStatusBadge'
 import ConnectionHistorySheet from './components/ConnectionHistorySheet'
@@ -10,6 +10,7 @@ import StockView from './components/StockView'
 import ExpiryView from './components/ExpiryView'
 import PerformanceView from './components/PerformanceView'
 import InsightView from './components/InsightView'
+import MoreHub from './components/MoreHub'
 import SettingsSheet from './components/SettingsSheet'
 import FABMenu from './components/FABMenu'
 import SmartScanner from './components/SmartScanner'
@@ -63,7 +64,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'dashboard' | 'stock' | 'expiry' | 'insights' | 'track'
+type Tab = 'dashboard' | 'stock' | 'expiry' | 'insights' | 'track' | 'more'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Home',     icon: <LayoutDashboard size={16} /> },
@@ -71,6 +72,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'expiry',    label: 'Expiry',   icon: <Clock size={16} /> },
   { id: 'insights',  label: 'Insights', icon: <Lightbulb size={16} /> },
   { id: 'track',     label: 'Track',    icon: <BarChart2 size={16} /> },
+  { id: 'more',      label: 'More',     icon: <MoreHorizontal size={16} /> },
 ]
 
 const TAB_TITLES: Record<Tab, string> = {
@@ -79,6 +81,7 @@ const TAB_TITLES: Record<Tab, string> = {
   expiry:    'Expiry Management',
   insights:  'AI Insights',
   track:     'Track',
+  more:      'More',
 }
 
 const LAST_TAB_KEY = 'grocery-manager-last-tab'
@@ -129,6 +132,7 @@ export default function App() {
       case 'expiry':    return <ExpiryView />
       case 'insights':  return <InsightView />
       case 'track':     return <PerformanceView />
+      case 'more':      return <MoreHub />
     }
   }
 

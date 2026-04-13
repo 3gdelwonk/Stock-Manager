@@ -22,10 +22,14 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         crew: resolve(__dirname, 'crew/index.html'),
         stockintel: resolve(__dirname, 'stockintel/index.html'),
+        milkorder: resolve(__dirname, 'milkorder/index.html'),
       },
       output: {
         manualChunks: {
           xlsx: ['xlsx'],
+          pdf: ['pdfjs-dist'],
+          anthropic: ['@anthropic-ai/sdk'],
+          zxing: ['@zxing/browser'],
           vendor: ['react', 'react-dom', 'recharts', 'dexie', 'dexie-react-hooks'],
         },
       },
@@ -36,7 +40,7 @@ export default defineConfig({
     VitePWA({
       registerType: 'prompt',
       workbox: {
-        navigateFallbackDenylist: [/^\/crew/, /^\/stockintel/],
+        navigateFallbackDenylist: [/^\/crew/, /^\/stockintel/, /^\/milkorder/],
       },
       manifest: {
         name: 'Grocery Manager',

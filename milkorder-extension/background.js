@@ -1,0 +1,396 @@
+/**
+ * background.js — MV3 service worker for IGA Milk Manager extension
+ *
+ * Responsibilities:
+ *  1. Receive order data relayed from the PWA (via pwa-bridge.js content script)
+ *  2. Persist pending order in chrome.storage.local
+ *  3. Update action badge to show pending item count
+ *  4. Receive schedule data scraped from Lactalis (Session 12)
+ *  5. Relay fill commands to the Lactalis content script (Session 13)
+ *  6. Cloud sync via Cloudflare Worker KV (push schedule, poll orders, push cookies)
+ */
+
+// ─── Cloud sync helpers ──────────────────────────────────────────────────────
+
+async function getCloudConfig() {
+  const r = await chrome.storage.local.get(['workerUrl', 'extensionSecret'])
+  if (r.workerUrl && r.extensionSecret) return r
+  return null
+}
+
+async function cloudFetch(path, options = {}) {
+  const config = await getCloudConfig()
+  if (!config) return null
+
+  const url = config.workerUrl.replace(/\/+$/, '') + path
+  const headers = {
+    'Authorization': `Bearer ${config.extensionSecret}`,
+    'Content-Type': 'application/json',
+    ...(options.headers || {}),
+  }
+
+  try {
+    const res = await fetch(url, { ...options, headers })
+    if (!res.ok) {
+      console.warn(`[Cloud] ${path} returned ${res.status}`)
+      return null
+    }
+    return res.json()
+  } catch (err) {
+    console.warn(`[Cloud] ${path} failed:`, err.message)
+    return null
+  }
+}
+
+// ─── Cloud: push schedule to KV ──────────────────────────────────────────────
+
+async function cloudPushSchedule(scheduleData) {
+  const config = await getCloudConfig()
+  if (!config) return
+  await cloudFetch('/extension/schedule', {
+    method: 'POST',
+    body: JSON.stringify(scheduleData),
+  })
+}
+
+// ─── Cloud: push order result to KV ─────────────────────────────────────────
+
+async function cloudPushOrderResult(submission) {
+  const config = await getCloudConfig()
+  if (!config) return
+
+  // Check if this was a cloud order
+  const storage = await chrome.storage.local.get('pendingOrder')
+  if (!storage.pendingOrder?.cloudOrder) return
+
+  await cloudFetch('/extension/order-result', {
+    method: 'POST',
+    body: JSON.stringify({
+      orderId: storage.pendingOrder.orderId,
+      success: !!submission.lactalisRef,
+      lactalisRef: submission.lactalisRef || null,
+    }),
+  })
+}
+
+// ─── Cloud: push cookies to KV ───────────────────────────────────────────────
+
+async function cloudPushCookies() {
+  const config = await getCloudConfig()
+  if (!config) return
+
+  try {
+    const cookies = await chrome.cookies.getAll({ domain: 'mylactalis.com.au' })
+    if (cookies.length === 0) return
+    const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ')
+    await cloudFetch('/extension/cookies', {
+      method: 'POST',
+      body: JSON.stringify({ cookies: cookieStr }),
+    })
+  } catch (err) {
+    console.warn('[Cloud] Cookie push failed:', err.message)
+  }
+}
+
+// ─── Alarms: cloud order polling + heartbeat ─────────────────────────────────
+
+// Set up alarms on service worker startup
+chrome.alarms.clearAll(() => {
+  chrome.alarms.create('poll-cloud-orders', { periodInMinutes: 0.5 }) // ~30s
+  chrome.alarms.create('push-cookies', { periodInMinutes: 5 })
+  chrome.alarms.create('keep-alive', { periodInMinutes: 10 }) // session keep-alive
+})
+
+/** Poll Worker for pending cloud orders and auto-submit */
+async function pollAndProcessCloudOrder() {
+  const config = await getCloudConfig()
+  if (!config) return // Not configured — skip silently
+
+  const result = await cloudFetch('/extension/pending-order')
+  if (!result?.order || !result.order.lines?.length) return
+
+  const order = result.order
+  const pendingOrder = {
+    orderId: order.orderId,
+    date: order.date || null,
+    lines: order.lines,
+    cloudOrder: true,
+    autoSubmit: true,
+  }
+
+  await chrome.storage.local.set({ pendingOrder })
+  updateBadge(pendingOrder)
+
+  // Try to submit on an existing Quick Order tab first
+  const storage = await chrome.storage.local.get('lactalisTab')
+  const tab = storage.lactalisTab
+
+  if (tab?.tabId && tab.pageType === 'quick_order') {
+    try {
+      await chrome.tabs.sendMessage(tab.tabId, { type: 'FILL_ORDER', order: pendingOrder })
+      return
+    } catch {
+      // Tab gone or unresponsive — fall through to create new tab
+    }
+  }
+
+  // Open Quick Order page in background
+  chrome.tabs.create({
+    url: 'https://my.lactalis.com.au/customer/product/quick-add/',
+    active: false,
+  })
+}
+
+/**
+ * Keep the Lactalis session alive by pinging a lightweight endpoint.
+ * If the session has expired (redirect to login), open the login page
+ * so autoLogin.js can re-authenticate.
+ */
+async function keepSessionAlive() {
+  const { autoLoginEnabled } = await chrome.storage.local.get('autoLoginEnabled')
+  if (!autoLoginEnabled) return
+
+  try {
+    // Use cookies API to check if we have Lactalis cookies at all
+    const cookies = await chrome.cookies.getAll({ domain: 'mylactalis.com.au' })
+    if (cookies.length === 0) {
+      // No cookies — open login page so autoLogin.js can log in
+      console.log('[Keep-Alive] No Lactalis cookies — opening login page')
+      openLactalisLoginIfNeeded()
+      return
+    }
+
+    // Ping a lightweight endpoint to keep cookies fresh
+    const resp = await fetch('https://my.lactalis.com.au/delivery-slots/get-slots/869?preselectCurrentSlot=1', {
+      credentials: 'include',
+      headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      redirect: 'manual',
+    })
+
+    // If redirected to login or got 401/403 — session expired
+    if (resp.status === 401 || resp.status === 403 || resp.type === 'opaqueredirect') {
+      console.log('[Keep-Alive] Session expired — opening login page')
+      openLactalisLoginIfNeeded()
+    } else {
+      console.log('[Keep-Alive] Session alive (status: ' + resp.status + ')')
+    }
+  } catch (err) {
+    console.warn('[Keep-Alive] Ping failed:', err.message)
+  }
+}
+
+/** Open the Lactalis login page if no Lactalis tab is already open */
+async function openLactalisLoginIfNeeded() {
+  // Check if a Lactalis tab already exists
+  const tabs = await chrome.tabs.query({ url: ['https://*.lactalis.com.au/*', 'https://mylactalis.com.au/*'] })
+  if (tabs.length > 0) {
+    // Reload the existing tab (will redirect to login if session expired)
+    chrome.tabs.reload(tabs[0].id)
+  } else {
+    chrome.tabs.create({
+      url: 'https://my.lactalis.com.au/customer/user/login',
+      active: false,
+    })
+  }
+}
+
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'poll-cloud-orders') {
+    await pollAndProcessCloudOrder()
+  }
+  if (alarm.name === 'push-cookies') {
+    await cloudPushCookies()
+  }
+  if (alarm.name === 'keep-alive') {
+    await keepSessionAlive()
+  }
+})
+
+// ─── Message handler ──────────────────────────────────────────────────────────
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  switch (msg.type) {
+
+    // PWA bridge relays localStorage order → chrome.storage.local
+    case 'PWA_ORDER_SYNC':
+      chrome.storage.local.set({ pendingOrder: msg.payload }, () => {
+        updateBadge(msg.payload)
+        sendResponse({ ok: true })
+      })
+      return true  // keep message channel open for async response
+
+    // Content script clears order after successful submission
+    case 'CLEAR_PENDING_ORDER':
+      chrome.storage.local.remove('pendingOrder', () => {
+        chrome.action.setBadgeText({ text: '' })
+        sendResponse({ ok: true })
+      })
+      return true
+
+    // Popup asks for current order
+    case 'GET_PENDING_ORDER':
+      chrome.storage.local.get('pendingOrder', (result) => {
+        sendResponse({ order: result.pendingOrder ?? null })
+      })
+      return true
+
+    // Content script reports which Lactalis page is active
+    case 'LACTALIS_PAGE_DETECTED':
+      chrome.storage.local.set({
+        lactalisTab: {
+          tabId: _sender.tab?.id,
+          pageType: msg.pageType,
+          url: msg.url,
+          detectedAt: Date.now(),
+        },
+      })
+      // Cloud: push cookies when we detect a Lactalis page
+      cloudPushCookies()
+      sendResponse({ ok: true })
+      return true
+
+    // Schedule data scraped from portal (Session 12)
+    case 'SCHEDULE_UPDATE':
+      chrome.storage.local.set({ schedule: msg.payload }, () => {
+        // Cloud: also push schedule to Worker KV
+        cloudPushSchedule(msg.payload)
+        sendResponse({ ok: true })
+      })
+      return true
+
+    // PWA requests a live schedule re-scrape
+    case 'TRIGGER_SCHEDULE_REFRESH':
+      chrome.storage.local.get('lactalisTab', (result) => {
+        if (result.lactalisTab?.tabId) {
+          chrome.tabs.sendMessage(result.lactalisTab.tabId, { type: 'SCRAPE_SCHEDULE' }, () => {
+            if (chrome.runtime.lastError) {
+              // Tab gone — open portal so scheduleScraper auto-runs on load
+              chrome.tabs.create({ url: 'https://my.lactalis.com.au/customer/product/quick-add/' })
+            }
+          })
+        } else {
+          chrome.tabs.create({ url: 'https://my.lactalis.com.au/customer/product/quick-add/' })
+        }
+        sendResponse({ ok: true })
+      })
+      return true
+
+    // PWA requests auto-submission of the pending order to Lactalis
+    case 'TRIGGER_ORDER_SUBMIT':
+      chrome.storage.local.get(['pendingOrder', 'lactalisTab'], (result) => {
+        const quickOrderUrl = 'https://my.lactalis.com.au/customer/product/quick-add/'
+        if (result.lactalisTab?.tabId && result.lactalisTab.pageType === 'quick_order') {
+          chrome.tabs.sendMessage(
+            result.lactalisTab.tabId,
+            { type: 'FILL_ORDER', order: result.pendingOrder },
+            () => {
+              if (chrome.runtime.lastError) {
+                chrome.tabs.create({ url: quickOrderUrl })
+              }
+            }
+          )
+        } else {
+          // quickOrder.js auto-detects pendingOrder on page load
+          chrome.tabs.create({ url: quickOrderUrl })
+        }
+        sendResponse({ ok: true })
+      })
+      return true
+
+    // Auto-login content script reports a login attempt
+    case 'AUTO_LOGIN_ATTEMPTED':
+      console.log(`[Auto-Login] Logged in as ${msg.username} at ${new Date(msg.timestamp).toLocaleTimeString()}`)
+      chrome.storage.local.set({ lastAutoLogin: msg.timestamp })
+      // Push cookies after login succeeds (small delay for cookies to be set)
+      setTimeout(() => cloudPushCookies(), 3000)
+      sendResponse({ ok: true })
+      return true
+
+    // Content script reports cloud order auto-submission result
+    case 'CLOUD_ORDER_SUBMITTED':
+      chrome.storage.local.get('pendingOrder', async (result) => {
+        if (result.pendingOrder?.cloudOrder) {
+          await cloudFetch('/extension/order-result', {
+            method: 'POST',
+            body: JSON.stringify({
+              orderId: result.pendingOrder.orderId,
+              success: msg.success,
+              lactalisRef: msg.lactalisRef || null,
+              error: msg.error || null,
+            }),
+          })
+          if (msg.success) {
+            chrome.storage.local.remove('pendingOrder')
+            chrome.action.setBadgeText({ text: '' })
+          }
+        }
+        sendResponse({ ok: true })
+      })
+      return true
+
+    default:
+      sendResponse({ ok: false, error: `Unknown message type: ${msg.type}` })
+  }
+})
+
+// ─── Badge helpers ────────────────────────────────────────────────────────────
+
+function updateBadge(order) {
+  if (!order || !Array.isArray(order.lines) || order.lines.length === 0) {
+    chrome.action.setBadgeText({ text: '' })
+    return
+  }
+  const count = order.lines.filter((l) => l.qty > 0).length
+  if (count > 0) {
+    chrome.action.setBadgeText({ text: String(count) })
+    chrome.action.setBadgeBackgroundColor({ color: '#2563eb' })
+  } else {
+    chrome.action.setBadgeText({ text: '' })
+  }
+}
+
+// Re-apply badge on service worker restart (storage persists, badge does not)
+chrome.storage.local.get('pendingOrder', (result) => {
+  updateBadge(result.pendingOrder ?? null)
+})
+
+// ─── Tab listener — clear stale lactalisTab when tab closes ──────────────────
+
+chrome.tabs.onRemoved.addListener((_tabId) => {
+  chrome.storage.local.get('lactalisTab', (result) => {
+    if (result.lactalisTab?.tabId === _tabId) {
+      chrome.storage.local.remove('lactalisTab')
+    }
+  })
+})
+
+// ─── Submission watcher — relay lastSubmission → statusUpdates for PWA ───────
+//
+// quickOrder.js sets { lastSubmission: { orderId, lactalisRef, submittedAt } }
+// when it detects a successful order reference on the portal page.
+// We append it to the statusUpdates array so pwa-bridge.js can mirror it to
+// the PWA's localStorage for extensionSync.ts to apply.
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local') return
+  if (!changes.lastSubmission?.newValue) return
+
+  const submission = changes.lastSubmission.newValue
+
+  // Cloud: push order result to Worker KV
+  cloudPushOrderResult(submission)
+
+  chrome.storage.local.get('statusUpdates', (result) => {
+    const existing = Array.isArray(result.statusUpdates) ? result.statusUpdates : []
+    // Avoid duplicates: skip if an entry for this orderId already exists
+    const alreadyQueued = existing.some((u) => u.orderId === submission.orderId)
+    if (!alreadyQueued) {
+      // Clear lastSubmission in the same write to prevent the onChanged listener
+      // from refiring and double-queuing the same submission (atomic read-modify-write)
+      chrome.storage.local.set({
+        statusUpdates: [...existing, submission],
+        lastSubmission: null,
+      })
+    }
+  })
+})

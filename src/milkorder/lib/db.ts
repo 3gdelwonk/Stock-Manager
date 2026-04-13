@@ -1,0 +1,165 @@
+import Dexie, { type Table } from 'dexie'
+import type {
+  Product,
+  StockSnapshot,
+  DeliverySlot,
+  Order,
+  OrderLine,
+  InvoiceRecord,
+  InvoiceLine,
+  PriceRecord,
+  ExpiryBatch,
+  WasteEntry,
+  ClaimRecord,
+  PhotoRecord,
+  GmailSyncRecord,
+  SalesRecord,
+} from './types'
+import { SEED_PRODUCTS } from '../data/seedProducts'
+import { PRODUCT_IMAGE_MAP } from '../data/productImageMap'
+
+export class MilkManagerDB extends Dexie {
+  products!: Table<Product>
+  stockSnapshots!: Table<StockSnapshot>
+  deliverySlots!: Table<DeliverySlot>
+  orders!: Table<Order>
+  orderLines!: Table<OrderLine>
+  invoiceRecords!: Table<InvoiceRecord>
+  invoiceLines!: Table<InvoiceLine>
+  priceHistory!: Table<PriceRecord>
+  expiryBatches!: Table<ExpiryBatch>
+  wasteLog!: Table<WasteEntry>
+  claimRecords!: Table<ClaimRecord>
+  photoRecords!: Table<PhotoRecord>
+  gmailSyncLog!: Table<GmailSyncRecord>
+  salesRecords!: Table<SalesRecord>
+
+  constructor() {
+    super('MilkManagerDB')
+    // v1 — kept for upgrade path (schema only, no data migration needed)
+    this.version(1).stores({
+      products: '++id, &barcode, &invoiceCode, itemNumber, category, active',
+      stockSnapshots: '++id, [productId+importedAt], importBatchId',
+      deliverySlots: '++id, deliveryDate, status, [orderCutoffDate+orderCutoffTime]',
+      orders: '++id, status, deliveryDate, createdAt',
+      orderLines: '++id, orderId, productId',
+      invoiceRecords: '++id, &documentNumber, invoiceDate',
+      invoiceLines: '++id, invoiceRecordId, productCode, deliveryDate',
+      priceHistory: '++id, [productId+effectiveDate], invoiceCode',
+    })
+    // v2 — barcode no longer unique (several products have empty barcode string)
+    this.version(2).stores({
+      products: '++id, barcode, &invoiceCode, itemNumber, category, active',
+    })
+    // v3 — expiry tracking tables
+    this.version(3).stores({
+      expiryBatches: '++id, productId, expiryDate, status, receivedDate',
+      wasteLog: '++id, productId, wastedDate, expiryBatchId',
+    })
+    // v4 — claim records
+    this.version(4).stores({
+      claimRecords: '++id, productId, claimType, createdAt',
+    })
+    // v5 — photo storage + claim orderId
+    this.version(5).stores({
+      photoRecords: '++id, orderId, claimId, productId, photoType, capturedAt',
+      claimRecords: '++id, productId, claimType, createdAt, orderId',
+    })
+    // v6 — Gmail sync log
+    this.version(6).stores({
+      gmailSyncLog: '++id, &messageId, syncedAt, parsed',
+    })
+    // v7 — POS sales records
+    this.version(7).stores({
+      salesRecords: '++id, productId, barcode, date, department',
+    })
+  }
+}
+
+export const db = new MilkManagerDB()
+
+export async function clearAllData(): Promise<void> {
+  await db.transaction('rw', [
+    db.invoiceRecords, db.invoiceLines, db.priceHistory,
+    db.stockSnapshots, db.orders, db.orderLines,
+    db.expiryBatches, db.wasteLog, db.products, db.claimRecords,
+    db.photoRecords,
+  ], async () => {
+    await Promise.all([
+      db.invoiceRecords.clear(),
+      db.invoiceLines.clear(),
+      db.priceHistory.clear(),
+      db.stockSnapshots.clear(),
+      db.orders.clear(),
+      db.orderLines.clear(),
+      db.expiryBatches.clear(),
+      db.wasteLog.clear(),
+      db.products.clear(),
+      db.claimRecords.clear(),
+      db.photoRecords.clear(),
+    ])
+  })
+  // Re-seed the product catalogue
+  await seedDatabase()
+}
+
+export async function seedDatabase(): Promise<void> {
+  const count = await db.products.count()
+  if (count >= SEED_PRODUCTS.length) return
+
+  const products: Product[] = SEED_PRODUCTS.map((p) => ({
+    barcode: p.barcode,
+    invoiceCode: p.invoiceCode,
+    itemNumber: p.itemNumber,
+    name: p.name,
+    category: p.category === 'uht' ? 'uht' : p.category,
+    isGstBearing: p.isGstBearing,
+    active: true,
+    orderUnit: p.orderUnit,
+    unitsPerOrder: p.unitsPerOrder,
+    minStockLevel: 0,
+    defaultOrderQty: p.avgQtyPerDelivery,
+    targetDaysOfStock: 4,
+    lactalisCostPrice: p.costPrice,
+    metcashCostPrice: p.metcashCost > 0 ? p.metcashCost : undefined,
+    sellPrice: p.sellPrice,
+    orderFrequency: p.orderFrequency,
+    imageUrl: PRODUCT_IMAGE_MAP[p.itemNumber] || '',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  }))
+
+  await db.products.bulkAdd(products)
+
+  // Request persistent storage to prevent iOS Safari from evicting IndexedDB
+  if (navigator.storage?.persist) {
+    navigator.storage.persist()
+  }
+}
+
+/**
+ * Replace any existing product images with baked-in thumbnails from the bundle.
+ * Runs once per app version — overwrites old Open Food Facts full-size images.
+ */
+export async function backfillBakedImages(): Promise<void> {
+  const imageKeys = Object.keys(PRODUCT_IMAGE_MAP)
+  if (imageKeys.length === 0) return
+
+  const allProducts = await db.products.toArray()
+  const updates: { key: number; changes: { imageUrl: string } }[] = []
+
+  for (const p of allProducts) {
+    const baked = PRODUCT_IMAGE_MAP[p.itemNumber]
+    if (baked && p.imageUrl !== baked) {
+      updates.push({ key: p.id!, changes: { imageUrl: baked } })
+    }
+  }
+
+  if (updates.length > 0) {
+    await db.transaction('rw', db.products, async () => {
+      for (const u of updates) {
+        await db.products.update(u.key, u.changes)
+      }
+    })
+  }
+}

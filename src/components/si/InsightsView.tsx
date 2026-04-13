@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer, ReferenceLine,
+  Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import {
-  Users, TrendingUp, DollarSign, Home, Star,
+  Users, TrendingUp, DollarSign, Star,
   ShoppingCart, AlertCircle, CheckCircle, Calendar,
   Activity, Globe, BookOpen, RefreshCw,
 } from 'lucide-react'
@@ -211,7 +211,7 @@ async function fetchMelbourneFoodCPI(): Promise<{ trend: CpiPoint[]; current: Cp
     .map(([period, vals]) => ({ period: period.replace(/^(\d{4})-(\d{2})$/, '$1-$2'), ...vals }))
 
   // Latest values
-  const last = trend[trend.length - 1]
+  const last = trend[trend.length - 1] as (Record<string, number | string> | undefined)
   if (last) {
     for (const cat of CPI_CATEGORIES) {
       const v = last[cat.name]
@@ -273,7 +273,7 @@ function ScoreDots({ score }: { score: number }) {
   )
 }
 
-function CpiBar({ name, value, color }: { name: string; value: number; color: string }) {
+function CpiBar({ name, value }: { name: string; value: number; color: string }) {
   const urgency = value >= 5 ? 'text-red-600' : value >= 3 ? 'text-amber-600' : 'text-emerald-600'
   const barColor = value >= 5 ? '#ef4444' : value >= 3 ? '#f59e0b' : '#10b981'
   const pct = Math.min(100, Math.max(0, (value / 8) * 100))
