@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { RefreshCw, WifiOff, TrendingUp, TrendingDown, AlertTriangle, ScanBarcode, Search, Clock, Tag, Package } from 'lucide-react'
+import { RefreshCw, WifiOff, TrendingUp, TrendingDown, AlertTriangle, ScanBarcode, Search, Clock, Tag, Package, ChevronDown, Zap } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-import { checkConnection, getSalesSummary, getDepartmentBreakdown, getTopSellers, type SalesSummary, type DepartmentBreakdown, type TopSeller } from '../lib/jarvis'
+import { checkConnection, getSalesSummary, getDepartmentBreakdown, getTopSellers, getTopByDepartment, type SalesSummary, type DepartmentBreakdown, type TopSeller, type TopByDeptEntry } from '../lib/jarvis'
 import { getExpirySummary, type ExpirySummary } from '../lib/expiry'
 import { DEPARTMENT_COLORS, DEPARTMENT_LABELS } from '../lib/constants'
 import { DEPT_NAME_MAP } from '../lib/constants'
@@ -67,6 +67,12 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [topSellers, setTopSellers] = useState<TopSeller[]>([])
   const [expiry, setExpiry] = useState<ExpirySummary | null>(null)
 
+  // Department drill-down — tap a tile to see top-velocity products for that dept
+  const [expandedDept, setExpandedDept] = useState<string | null>(null)
+  const [deptTopCache, setDeptTopCache] = useState<Record<string, TopByDeptEntry[]>>({})
+  const [deptTopLoading, setDeptTopLoading] = useState(false)
+  const [deptTopError, setDeptTopError] = useState<string | null>(null)
+
   // ── Fetch All ────────────────
   const fetchAll = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
@@ -117,6 +123,34 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     const id = setInterval(() => fetchAll(true), REFRESH_INTERVAL)
     return () => clearInterval(id)
   }, [fetchAll])
+
+  // ── Department drill-down: fetch top-velocity items on first expansion ──
+  const handleDeptClick = useCallback(async (rawName: string) => {
+    // Toggle: tap the same tile again to collapse
+    if (expandedDept === rawName) {
+      setExpandedDept(null)
+      return
+    }
+    setExpandedDept(rawName)
+    setDeptTopError(null)
+    if (deptTopCache[rawName]) return // already loaded
+
+    setDeptTopLoading(true)
+    try {
+      const res = await getTopByDepartment({
+        departments: [rawName],
+        sort: 'velocity',
+        perDept: 5,
+        days: 7,
+      })
+      const items = res.byDepartment[rawName]?.top ?? []
+      setDeptTopCache(prev => ({ ...prev, [rawName]: items }))
+    } catch (err) {
+      setDeptTopError((err as Error).message || 'Failed to load')
+    } finally {
+      setDeptTopLoading(false)
+    }
+  }, [expandedDept, deptTopCache])
 
   // ── Derived: sorted departments ──
   const sortedDepts = useMemo(
@@ -300,26 +334,98 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         </div>
       )}
 
-      {/* 4. Department Tiles */}
+      {/* 4. Department Tiles — tap to see top-velocity products */}
       {sortedDepts.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-gray-700 mb-2">Departments Today</p>
           <div className="grid grid-cols-2 gap-2">
             {sortedDepts.map(d => {
               const color = deptColor(d.department)
+              const isExpanded = expandedDept === d.department
               return (
-                <div
+                <button
                   key={d.code}
-                  className="rounded-lg bg-white border border-gray-200 p-2.5 shadow-sm"
+                  type="button"
+                  onClick={() => handleDeptClick(d.department)}
+                  aria-expanded={isExpanded}
+                  className={`rounded-lg bg-white border p-2.5 shadow-sm text-left transition-all active:scale-[0.98] ${
+                    isExpanded ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-gray-200 hover:border-gray-300'
+                  }`}
                   style={{ borderLeftWidth: 4, borderLeftColor: color }}
                 >
-                  <p className="text-xs font-semibold text-gray-800 truncate">{deptLabel(d.department)}</p>
+                  <div className="flex items-start justify-between gap-1">
+                    <p className="text-xs font-semibold text-gray-800 truncate flex-1">{deptLabel(d.department)}</p>
+                    <ChevronDown
+                      className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                    />
+                  </div>
                   <p className="text-sm font-bold text-gray-900 mt-0.5">{fmtMoney(d.sales, true)}</p>
                   <p className="text-[10px] text-gray-400">{fmtPct(d.marginPercent)} margin</p>
-                </div>
+                </button>
               )
             })}
           </div>
+
+          {/* Expanded drill-down panel — top-velocity products for the tapped dept */}
+          {expandedDept && (() => {
+            const dept = sortedDepts.find(d => d.department === expandedDept)
+            if (!dept) return null
+            const color = deptColor(dept.department)
+            const items = deptTopCache[expandedDept]
+            return (
+              <div
+                className="mt-2 rounded-lg bg-white border border-gray-200 shadow-sm overflow-hidden"
+                style={{ borderLeftWidth: 4, borderLeftColor: color }}
+              >
+                <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 bg-gray-50">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Zap className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <p className="text-xs font-semibold text-gray-700 truncate">
+                      Fastest moving · {deptLabel(dept.department)}
+                    </p>
+                  </div>
+                  <span className="text-[10px] text-gray-400 shrink-0">Last 7 days</span>
+                </div>
+
+                {deptTopLoading && !items ? (
+                  <div className="flex items-center justify-center py-6">
+                    <RefreshCw className="w-4 h-4 text-emerald-600 animate-spin" />
+                  </div>
+                ) : deptTopError && !items ? (
+                  <div className="px-3 py-4 text-center">
+                    <p className="text-xs text-red-600">{deptTopError}</p>
+                    <button
+                      onClick={() => handleDeptClick(expandedDept)}
+                      className="text-[11px] text-emerald-600 underline mt-1"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : !items || items.length === 0 ? (
+                  <p className="px-3 py-4 text-center text-xs text-gray-400">
+                    No velocity data for this department.
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-gray-100">
+                    {items.map((item, i) => (
+                      <li key={item.itemCode || i} className="flex items-center gap-2 px-3 py-2">
+                        <span className="text-xs font-bold text-gray-400 w-5 text-right shrink-0">{i + 1}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-gray-900 truncate leading-tight">{item.description.trim()}</p>
+                          <p className="text-[10px] text-gray-400 mt-0.5">
+                            {item.qtySold.toLocaleString('en-AU')} sold · {fmtPct(item.gpPct)} GP · QOH {item.qoh}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200">
+                          {item.avgDailyVelocity.toFixed(1)}/day
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )
+          })()}
         </div>
       )}
 
