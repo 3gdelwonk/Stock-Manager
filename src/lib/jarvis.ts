@@ -120,6 +120,12 @@ interface RawSalesSummary {
   avgBasketSize: number
   normalSales: number
   promotionSales: number
+  // Margin overhaul (2026-04-14) — ISH-sourced transaction-accurate totals
+  basis?: 'ish_incl_manager_special' | 'ish_excl_manager_special'
+  managerSpecialSales?: number
+  managerSpecialCost?: number
+  managerSpecialGP?: number
+  totalQty?: number
 }
 
 interface RawDepartment {
@@ -132,6 +138,10 @@ interface RawDepartment {
   transactions: number
   normalSales: number
   promotionSales: number
+  managerSpecialSales?: number
+  managerSpecialCost?: number
+  managerSpecialGP?: number
+  totalQty?: number
 }
 
 interface RawTopSeller {
@@ -171,6 +181,8 @@ export interface ConnectionStatus {
   [key: string]: unknown
 }
 
+export type MarginBasis = 'ish_incl_manager_special' | 'ish_excl_manager_special'
+
 export interface SalesSummary {
   period: string
   totalRevenue: number
@@ -181,6 +193,11 @@ export interface SalesSummary {
   avgBasketSize: number
   normalSales: number
   promotionSales: number
+  basis?: MarginBasis
+  managerSpecialSales?: number
+  managerSpecialCost?: number
+  managerSpecialGP?: number
+  totalQty?: number
 }
 
 export interface DepartmentBreakdown {
@@ -193,6 +210,16 @@ export interface DepartmentBreakdown {
   transactions: number
   normalSales: number
   promotionSales: number
+  managerSpecialSales?: number
+  managerSpecialCost?: number
+  managerSpecialGP?: number
+  totalQty?: number
+}
+
+export interface DepartmentBreakdownResponse {
+  period: string
+  basis?: MarginBasis
+  departments: DepartmentBreakdown[]
 }
 
 export interface TopSeller {
@@ -254,9 +281,45 @@ export interface StockFilters {
 
 // ── Price tracking types ────────────────────────────────────────────────────
 
+/**
+ * Response shape for GET /api/pos/price/:itemCode
+ *
+ * ⚠️  Margin overhaul (2026-04-14): always read `marginPercent` / `unitCostInc`
+ * from this response. DO NOT compute margin as (RegSellPrice - AvgCost)/RegSellPrice.
+ * `AvgCost` is retained for backward compatibility but drifts unpredictably with
+ * stocktake adjustments — display `unitCostInc` instead, labelled "Unit cost (inc GST)".
+ */
 export interface PriceCheck {
+  ItemCode: string
+  ItemDescription: string
+  barcode: string | null
+  barcodes?: string[]
+  DepartmentName: string
+  DepartmentCode: number
   RegSellPrice: number
   PrevSellPrice: number
+  /** @deprecated drifts with stocktake; use `unitCostInc` */
+  AvgCost: number
+  QOH: number
+  GSTCode?: string
+  GSTRate?: number
+  AvgDayQty?: number
+  AvgWeekQty?: number
+  MinOH?: number
+  IsWeigh?: boolean
+  // Canonical margin fields — use these
+  effectiveSellInc: number
+  unitCostInc: number
+  unitCostSource: 'primary' | 'store_supplier' | 'aligned_promo' | 'cost_deal'
+  marginBasis: 'normal' | 'aligned_promo' | 'cost_deal'
+  marginDollar: number
+  marginPercent: number
+  targetGP: number | null
+  normalGP: number | null
+  supplier: string | null
+  supplierCtnCost: number | null
+  supplierCtnQty: number | null
+  promoEndsOn: string | null
   [key: string]: unknown
 }
 
@@ -330,8 +393,15 @@ export async function checkConnection(): Promise<ConnectionStatus> {
   }
 }
 
-export async function getSalesSummary(period: 'today' | 'week' | 'month' | string = 'today'): Promise<SalesSummary> {
-  const raw = await jarvisFetch<RawSalesSummary>(`/api/pos/sales?period=${encodeURIComponent(period)}`)
+export async function getSalesSummary(
+  period: 'today' | 'week' | 'month' | string = 'today',
+  opts: { includeManagerSpecial?: boolean } = {},
+): Promise<SalesSummary> {
+  const qs = new URLSearchParams({ period })
+  if (opts.includeManagerSpecial !== undefined) {
+    qs.set('includeManagerSpecial', opts.includeManagerSpecial ? '1' : '0')
+  }
+  const raw = await jarvisFetch<RawSalesSummary>(`/api/pos/sales?${qs}`)
   return {
     period:              raw.period,
     totalRevenue:        raw.totalRevenue,
@@ -342,25 +412,52 @@ export async function getSalesSummary(period: 'today' | 'week' | 'month' | strin
     avgBasketSize:       raw.avgBasketSize,
     normalSales:         raw.normalSales,
     promotionSales:      raw.promotionSales,
+    basis:               raw.basis,
+    managerSpecialSales: raw.managerSpecialSales,
+    managerSpecialCost:  raw.managerSpecialCost,
+    managerSpecialGP:    raw.managerSpecialGP,
+    totalQty:            raw.totalQty,
   }
 }
 
-export async function getDepartmentBreakdown(period: 'today' | 'week' | 'month' | string = 'today'): Promise<DepartmentBreakdown[]> {
-  const raw = await jarvisFetch<{ period: string; departments: RawDepartment[] }>(
-    `/api/pos/departments?period=${encodeURIComponent(period)}`
+export async function getDepartmentBreakdown(
+  period: 'today' | 'week' | 'month' | string = 'today',
+  opts: { includeManagerSpecial?: boolean } = {},
+): Promise<DepartmentBreakdown[]> {
+  const res = await getDepartmentBreakdownEnvelope(period, opts)
+  return res.departments
+}
+
+export async function getDepartmentBreakdownEnvelope(
+  period: 'today' | 'week' | 'month' | string = 'today',
+  opts: { includeManagerSpecial?: boolean } = {},
+): Promise<DepartmentBreakdownResponse> {
+  const qs = new URLSearchParams({ period })
+  if (opts.includeManagerSpecial !== undefined) {
+    qs.set('includeManagerSpecial', opts.includeManagerSpecial ? '1' : '0')
+  }
+  const raw = await jarvisFetch<{ period: string; basis?: MarginBasis; departments: RawDepartment[] }>(
+    `/api/pos/departments?${qs}`
   )
-  return raw.departments
-    .map(d => ({
-      code:            d.code,
-      department:      d.name,
-      sales:           d.totalSales,
-      cost:            d.totalCost,
-      grossProfit:     d.grossProfit,
-      marginPercent:   d.marginPercent,
-      transactions:    d.transactions,
-      normalSales:     d.normalSales,
-      promotionSales:  d.promotionSales,
-    }))
+  return {
+    period: raw.period,
+    basis: raw.basis,
+    departments: raw.departments.map(d => ({
+      code:                d.code,
+      department:          d.name,
+      sales:               d.totalSales,
+      cost:                d.totalCost,
+      grossProfit:         d.grossProfit,
+      marginPercent:       d.marginPercent,
+      transactions:        d.transactions,
+      normalSales:         d.normalSales,
+      promotionSales:      d.promotionSales,
+      managerSpecialSales: d.managerSpecialSales,
+      managerSpecialCost:  d.managerSpecialCost,
+      managerSpecialGP:    d.managerSpecialGP,
+      totalQty:            d.totalQty,
+    })),
+  }
 }
 
 export async function getTopSellers(days = 7, limit = 20): Promise<TopSeller[]> {
@@ -1044,14 +1141,124 @@ export interface TrendEntry {
   grossProfit: number
   transactions: number
   promoSalesPercent?: number
+  normalSales?: number
+  promoSales?: number
+  managerSpecialSales?: number
+  managerSpecialCost?: number
   [key: string]: unknown
 }
 
 export async function getTrends(
   range: 'daily' | 'weekly' | 'monthly' | string = 'daily',
   days = 30,
-): Promise<{ range: string; entries: TrendEntry[] }> {
-  return jarvisFetch(`/api/pos/trends?range=${encodeURIComponent(range)}&days=${days}`)
+  opts: { includeManagerSpecial?: boolean } = {},
+): Promise<{ range: string; basis?: MarginBasis; entries: TrendEntry[] }> {
+  const qs = new URLSearchParams({ range, days: String(days) })
+  if (opts.includeManagerSpecial !== undefined) {
+    qs.set('includeManagerSpecial', opts.includeManagerSpecial ? '1' : '0')
+  }
+  return jarvisFetch(`/api/pos/trends?${qs}`)
+}
+
+// ── Loss Items (new, 2026-04-14) ─────────────────────────────────────────────
+
+export type LossItemBasis = 'normal' | 'shelf_promo' | 'markdown' | 'offer'
+
+export interface LossItem {
+  barCode: string
+  itemCode: string
+  description: string
+  department: string
+  departmentCode: number
+  wkQty: number
+  sellInc: number
+  costInc: number
+  wkBleed: number
+  unitBleed: number
+  gpPct: number
+  basis: LossItemBasis
+}
+
+export interface LossItemsResponse {
+  period: string
+  basis: MarginBasis
+  totalLossItems: number
+  totalBleedInc: number
+  byDepartment: Record<string, LossItem[]>
+  items: LossItem[]
+}
+
+export async function getLossItems(opts: {
+  days?: number
+  limit?: number
+  minBleed?: number
+  includeManagerSpecial?: boolean
+  department?: string
+} = {}): Promise<LossItemsResponse> {
+  const qs = new URLSearchParams()
+  if (opts.days !== undefined) qs.set('days', String(opts.days))
+  if (opts.limit !== undefined) qs.set('limit', String(opts.limit))
+  if (opts.minBleed !== undefined) qs.set('minBleed', String(opts.minBleed))
+  if (opts.includeManagerSpecial !== undefined) {
+    qs.set('includeManagerSpecial', opts.includeManagerSpecial ? '1' : '0')
+  }
+  if (opts.department) qs.set('department', opts.department)
+  const q = qs.toString()
+  return jarvisFetch<LossItemsResponse>(`/api/pos/loss-items${q ? '?' + q : ''}`)
+}
+
+// ── Top by Department (new, 2026-04-14) ──────────────────────────────────────
+
+export type TopByDeptSort = 'margin' | 'velocity' | 'revenue' | 'gp_dollars'
+
+export interface TopByDeptEntry {
+  rank: number
+  barCode: string
+  itemCode: string
+  description: string
+  revenue: number
+  cost: number
+  grossProfit: number
+  gpPct: number
+  qtySold: number
+  avgDailyVelocity: number
+  qoh: number
+  sellPrice: number
+}
+
+export interface TopByDeptBucket {
+  top: TopByDeptEntry[]
+  bottom: TopByDeptEntry[]
+}
+
+export interface TopByDepartmentResponse {
+  period: string
+  sort: TopByDeptSort
+  perDept: number
+  minRevenue: number
+  basis: MarginBasis
+  byDepartment: Record<string, TopByDeptBucket>
+}
+
+export async function getTopByDepartment(opts: {
+  days?: number
+  perDept?: number
+  sort?: TopByDeptSort
+  departments?: string[]
+  minRevenue?: number
+  includeManagerSpecial?: boolean
+} = {}): Promise<TopByDepartmentResponse> {
+  const qs = new URLSearchParams()
+  if (opts.days !== undefined) qs.set('days', String(opts.days))
+  if (opts.perDept !== undefined) qs.set('perDept', String(opts.perDept))
+  if (opts.sort) qs.set('sort', opts.sort)
+  if (opts.departments?.length) qs.set('departments', opts.departments.join(','))
+  if (opts.minRevenue !== undefined) qs.set('minRevenue', String(opts.minRevenue))
+  if (opts.includeManagerSpecial !== undefined) {
+    qs.set('includeManagerSpecial', opts.includeManagerSpecial ? '1' : '0')
+  }
+  const q = qs.toString()
+  return jarvisFetch<TopByDepartmentResponse>(`/api/pos/top-by-department${q ? '?' + q : ''}`)
 }
 
 // ── Expense Trends ───────────────────────────────────────────────────────────
