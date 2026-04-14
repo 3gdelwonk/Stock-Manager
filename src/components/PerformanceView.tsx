@@ -11,8 +11,9 @@ import type { ItemPerformanceEntry, StockSuggestion } from '../lib/jarvis'
 import { useTrackedItemCodes } from '../lib/useTrackedItems'
 import type { StockPerformance } from '../lib/types'
 import { LEAD_TIME_DEFAULT } from '../lib/constants'
+import TopByDeptPanel from './TopByDeptPanel'
 
-type SubView = 'table' | 'matrix' | 'rankings' | 'reorder'
+type SubView = 'table' | 'matrix' | 'rankings' | 'reorder' | 'depts'
 type SortCol = 'name' | 'qoh' | 'days' | 'velocity' | 'trend' | 'gmroi' | 'abc' | 'xyz'
 
 const ABC_COLORS: Record<string, string> = { A: 'bg-green-100 text-green-700', B: 'bg-blue-100 text-blue-700', C: 'bg-amber-100 text-amber-700', D: 'bg-gray-100 text-gray-500' }
@@ -84,15 +85,6 @@ export default function PerformanceView() {
     return { latestQoh, abcMap, xyzMap, perfMap, sv, qohMap, matrix, abcDist, xyzDist, deadStock, deadValue }
   }, [products, snapshots, salesRecords])
 
-  if (!products || !computed) return <div className="flex items-center justify-center h-full"><div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" /></div>
-
-  if (!products.length) return <div className="flex items-center justify-center h-full"><p className="text-sm text-gray-400">Import products first</p></div>
-
-  function handleSort(col: SortCol) {
-    if (sortCol === col) setSortAsc(a => !a)
-    else { setSortCol(col); setSortAsc(false) }
-  }
-
   const rows = useMemo(() => {
     if (!products || !computed) return []
     return [...products]
@@ -119,6 +111,52 @@ export default function PerformanceView() {
       })
   }, [products, computed, snapshots, sortCol, sortAsc])
 
+  function handleSort(col: SortCol) {
+    if (sortCol === col) setSortAsc(a => !a)
+    else { setSortCol(col); setSortAsc(false) }
+  }
+
+  // Sub-nav is rendered from multiple return paths — factor out once.
+  const subNav = (
+    <div className="flex border-b border-gray-100 bg-white overflow-x-auto">
+      {(['table', 'matrix', 'rankings', 'reorder', 'depts'] as SubView[]).map(v => (
+        <button key={v} onClick={() => setSubView(v)} className={`flex-1 py-2.5 text-sm font-medium transition-colors whitespace-nowrap px-2 ${subView === v ? 'text-emerald-600 border-b-2 border-emerald-600' : 'text-gray-500'}`}>
+          {v === 'depts' ? 'Depts' : v.charAt(0).toUpperCase() + v.slice(1)}
+        </button>
+      ))}
+    </div>
+  )
+
+  // Depts sub-view pulls from JARVIS directly — doesn't need local Dexie data.
+  if (subView === 'depts') {
+    return (
+      <div className="flex flex-col h-full">
+        {subNav}
+        <div className="flex-1 overflow-auto">
+          <TopByDeptPanel />
+        </div>
+      </div>
+    )
+  }
+
+  if (!products || !computed) return (
+    <div className="flex flex-col h-full">
+      {subNav}
+      <div className="flex-1 flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    </div>
+  )
+
+  if (!products.length) return (
+    <div className="flex flex-col h-full">
+      {subNav}
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-sm text-gray-400">Import products first</p>
+      </div>
+    </div>
+  )
+
   const total = products.length || 1
   const SortHeader = ({ col, label }: { col: SortCol; label: string }) => (
     <th className="py-2 px-2 text-left font-medium cursor-pointer whitespace-nowrap select-none" onClick={() => handleSort(col)}>
@@ -128,14 +166,7 @@ export default function PerformanceView() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Sub-nav */}
-      <div className="flex border-b border-gray-100 bg-white overflow-x-auto">
-        {(['table', 'matrix', 'rankings', 'reorder'] as SubView[]).map(v => (
-          <button key={v} onClick={() => setSubView(v)} className={`flex-1 py-2.5 text-sm font-medium transition-colors whitespace-nowrap px-2 ${subView === v ? 'text-emerald-600 border-b-2 border-emerald-600' : 'text-gray-500'}`}>
-            {v.charAt(0).toUpperCase() + v.slice(1)}
-          </button>
-        ))}
-      </div>
+      {subNav}
 
       <div className="flex-1 overflow-auto">
         {subView === 'table' ? (
