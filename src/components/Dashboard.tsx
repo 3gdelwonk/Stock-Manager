@@ -67,9 +67,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [topSellers, setTopSellers] = useState<TopSeller[]>([])
   const [expiry, setExpiry] = useState<ExpirySummary | null>(null)
 
-  // Department drill-down — tap a tile to see top-velocity products for that dept
+  // Department drill-down — one fetch for ALL depts, picked client-side on tap
   const [expandedDept, setExpandedDept] = useState<string | null>(null)
-  const [deptTopCache, setDeptTopCache] = useState<Record<string, TopByDeptEntry[]>>({})
+  const [deptTopMap, setDeptTopMap] = useState<Record<string, TopByDeptEntry[]> | null>(null)
   const [deptTopLoading, setDeptTopLoading] = useState(false)
   const [deptTopError, setDeptTopError] = useState<string | null>(null)
 
@@ -124,36 +124,39 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     return () => clearInterval(id)
   }, [fetchAll])
 
-  // ── Department drill-down: fetch top-velocity items on first expansion ──
-  const handleDeptClick = useCallback(async (rawName: string) => {
-    // Toggle: tap the same tile again to collapse
-    if (expandedDept === rawName) {
-      setExpandedDept(null)
-      return
-    }
-    setExpandedDept(rawName)
-    setDeptTopError(null)
-    if (deptTopCache[rawName]) return // already loaded
-
+  // ── Department drill-down: fetch ALL depts once, normalize keys ──
+  const loadDeptTopMap = useCallback(async () => {
     setDeptTopLoading(true)
+    setDeptTopError(null)
     try {
-      const res = await getTopByDepartment({
-        departments: [rawName],
-        sort: 'velocity',
-        perDept: 5,
-        days: 7,
+      const res = await getTopByDepartment({ sort: 'velocity', perDept: 5, days: 7 })
+      const map: Record<string, TopByDeptEntry[]> = {}
+      for (const [key, bucket] of Object.entries(res.byDepartment || {})) {
+        const norm = key.toUpperCase().trim()
+        map[norm] = bucket?.top ?? []
+      }
+      console.log('[dashboard] dept velocity map loaded', {
+        keys: Object.keys(map),
+        counts: Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v.length])),
       })
-      // We asked for one dept, so take the first (only) bucket regardless of
-      // the exact key the server echoes back.
-      const bucket = Object.values(res.byDepartment || {})[0]
-      const items = bucket?.top ?? []
-      setDeptTopCache(prev => ({ ...prev, [rawName]: items }))
+      setDeptTopMap(map)
     } catch (err) {
       setDeptTopError((err as Error).message || 'Failed to load')
     } finally {
       setDeptTopLoading(false)
     }
-  }, [expandedDept, deptTopCache])
+  }, [])
+
+  const handleDeptClick = useCallback((rawName: string) => {
+    if (expandedDept === rawName) {
+      setExpandedDept(null)
+      return
+    }
+    setExpandedDept(rawName)
+    if (!deptTopMap && !deptTopLoading) {
+      loadDeptTopMap()
+    }
+  }, [expandedDept, deptTopMap, deptTopLoading, loadDeptTopMap])
 
   // ── Derived: sorted departments ──
   // Show ALL departments the server returned (not just ones with sales today),
@@ -386,7 +389,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             const dept = sortedDepts.find(d => d.department === expandedDept)
             if (!dept) return null
             const color = deptColor(dept.department)
-            const items = deptTopCache[expandedDept]
+            const items = deptTopMap?.[expandedDept.toUpperCase().trim()] ?? []
+            const hasLoadedMap = deptTopMap !== null
             return (
               <div
                 className="mt-2 rounded-lg bg-white border border-gray-200 shadow-sm overflow-hidden"
@@ -405,38 +409,57 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                   <span className="text-[10px] text-gray-400 shrink-0">Last 7 days</span>
                 </div>
 
-                {deptTopLoading && !items ? (
+                {deptTopLoading && !hasLoadedMap ? (
                   <div className="flex items-center justify-center py-6">
                     <RefreshCw className="w-4 h-4 text-emerald-600 animate-spin" />
                   </div>
-                ) : deptTopError && !items ? (
+                ) : deptTopError && !hasLoadedMap ? (
                   <div className="px-3 py-4 text-center">
                     <p className="text-xs text-red-600">{deptTopError}</p>
                     <button
-                      onClick={() => handleDeptClick(expandedDept)}
+                      onClick={() => loadDeptTopMap()}
                       className="text-[11px] text-emerald-600 underline mt-1"
                     >
                       Retry
                     </button>
                   </div>
-                ) : !items || items.length === 0 ? (
-                  <p className="px-3 py-4 text-center text-xs text-gray-400">
-                    No velocity data for this department.
-                  </p>
+                ) : items.length === 0 ? (
+                  <div className="px-3 py-4 text-center">
+                    <p className="text-xs text-gray-400">No velocity data for this department.</p>
+                    {hasLoadedMap && deptTopMap && (
+                      <p className="text-[10px] text-gray-300 mt-1 break-all">
+                        Server keys: {Object.keys(deptTopMap).join(', ') || '(empty)'}
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <ul className="divide-y divide-gray-100">
                     {items.map((item, i) => (
-                      <li key={item.itemCode || i} className="flex items-center gap-2 px-3 py-2">
-                        <span className="text-xs font-bold text-gray-400 w-5 text-right shrink-0">{i + 1}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-gray-900 truncate leading-tight">{item.description.trim()}</p>
-                          <p className="text-[10px] text-gray-400 mt-0.5">
-                            {item.qtySold.toLocaleString('en-AU')} sold · {fmtPct(item.gpPct)} GP · QOH {item.qoh}
-                          </p>
+                      <li key={item.itemCode || i} className="px-3 py-2">
+                        <div className="flex items-start gap-2">
+                          <span className="text-xs font-bold text-gray-400 w-5 text-right shrink-0 mt-0.5">{i + 1}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-gray-900 truncate leading-tight">{item.description.trim() || item.itemCode}</p>
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[10px]">
+                              <span className="text-gray-500">
+                                <span className="font-semibold text-gray-700">{item.qtySold.toLocaleString('en-AU')}</span> sold
+                              </span>
+                              <span className="text-gray-300">·</span>
+                              <span className="text-gray-500">
+                                <span className="font-semibold text-gray-700">{fmtMoney(item.revenue, true)}</span> rev
+                              </span>
+                              <span className="text-gray-300">·</span>
+                              <span className={`font-semibold ${item.gpPct < 0 ? 'text-red-600' : item.gpPct < 10 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                {fmtPct(item.gpPct)} GP
+                              </span>
+                              <span className="text-gray-300">·</span>
+                              <span className="text-gray-400">QOH {item.qoh}</span>
+                            </div>
+                          </div>
+                          <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200">
+                            {item.avgDailyVelocity.toFixed(1)}/day
+                          </span>
                         </div>
-                        <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200">
-                          {item.avgDailyVelocity.toFixed(1)}/day
-                        </span>
                       </li>
                     ))}
                   </ul>
