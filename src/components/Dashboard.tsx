@@ -1,11 +1,18 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { RefreshCw, WifiOff, TrendingUp, TrendingDown, AlertTriangle, ScanBarcode, Search, Clock, Tag, Package, ChevronDown, Zap } from 'lucide-react'
+import { RefreshCw, WifiOff, TrendingUp, TrendingDown, AlertTriangle, ScanBarcode, Search, Clock, Tag, Package, ChevronDown, Zap, MoreHorizontal } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { checkConnection, getSalesSummary, getDepartmentBreakdown, getTopSellers, getTopByDepartment, type SalesSummary, type DepartmentBreakdown, type TopSeller, type TopByDeptEntry } from '../lib/jarvis'
 import { getExpirySummary, type ExpirySummary } from '../lib/expiry'
 import { DEPARTMENT_COLORS, DEPARTMENT_LABELS } from '../lib/constants'
 import { DEPT_NAME_MAP } from '../lib/constants'
 import type { GroceryDepartment } from '../lib/types'
+import ProductImage from './ProductImage'
+
+// Major / food-first departments — always visible on the dashboard grid.
+// Everything else is hidden behind a "More" toggle.
+const MAIN_DEPARTMENTS: ReadonlySet<GroceryDepartment> = new Set([
+  'grocery', 'dairy', 'frozen', 'fresh_produce', 'meat', 'deli', 'bakery',
+])
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -72,6 +79,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const [deptTopMap, setDeptTopMap] = useState<Record<string, TopByDeptEntry[]> | null>(null)
   const [deptTopLoading, setDeptTopLoading] = useState(false)
   const [deptTopError, setDeptTopError] = useState<string | null>(null)
+  const [showMinorDepts, setShowMinorDepts] = useState(false)
 
   // ── Fetch All ────────────────
   const fetchAll = useCallback(async (isRefresh = false) => {
@@ -168,6 +176,19 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     }),
     [departments],
   )
+
+  // Main = grocery/dairy/frozen/fresh produce/meat/deli/bakery. Everything
+  // else (tobacco, pet, baby, household, health & beauty, general merch, …)
+  // sits behind a "More" button and only appears when the user taps it.
+  const { mainDepts, minorDepts } = useMemo(() => {
+    const main: DepartmentBreakdown[] = []
+    const minor: DepartmentBreakdown[] = []
+    for (const d of sortedDepts) {
+      if (MAIN_DEPARTMENTS.has(resolveDept(d.department))) main.push(d)
+      else minor.push(d)
+    }
+    return { mainDepts: main, minorDepts: minor }
+  }, [sortedDepts])
 
   // ── Derived: chart data (only non-zero sales — zero bars are noise) ──
   const chartData = useMemo(
@@ -346,43 +367,68 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       )}
 
       {/* 4. Department Tiles — tap to see top-velocity products */}
-      {sortedDepts.length > 0 && (
+      {sortedDepts.length > 0 && (() => {
+        const renderTile = (d: DepartmentBreakdown) => {
+          const color = deptColor(d.department)
+          const isExpanded = expandedDept === d.department
+          const label = deptLabel(d.department)
+          const showRaw = label.toUpperCase() !== d.department.toUpperCase()
+          return (
+            <button
+              key={d.code}
+              type="button"
+              onClick={() => handleDeptClick(d.department)}
+              aria-expanded={isExpanded}
+              className={`rounded-lg bg-white border p-2.5 shadow-sm text-left transition-all active:scale-[0.98] ${
+                isExpanded ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-gray-200 hover:border-gray-300'
+              }`}
+              style={{ borderLeftWidth: 4, borderLeftColor: color }}
+            >
+              <div className="flex items-start justify-between gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-gray-800 truncate">{label}</p>
+                  {showRaw && (
+                    <p className="text-[9px] text-gray-400 uppercase tracking-wide truncate">{d.department}</p>
+                  )}
+                </div>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+                />
+              </div>
+              <p className="text-sm font-bold text-gray-900 mt-0.5">{fmtMoney(d.sales, true)}</p>
+              <p className="text-[10px] text-gray-400">{fmtPct(d.marginPercent)} margin</p>
+            </button>
+          )
+        }
+        return (
         <div>
           <p className="text-xs font-semibold text-gray-700 mb-2">Departments Today</p>
           <div className="grid grid-cols-2 gap-2">
-            {sortedDepts.map(d => {
-              const color = deptColor(d.department)
-              const isExpanded = expandedDept === d.department
-              const label = deptLabel(d.department)
-              const showRaw = label.toUpperCase() !== d.department.toUpperCase()
-              return (
-                <button
-                  key={d.code}
-                  type="button"
-                  onClick={() => handleDeptClick(d.department)}
-                  aria-expanded={isExpanded}
-                  className={`rounded-lg bg-white border p-2.5 shadow-sm text-left transition-all active:scale-[0.98] ${
-                    isExpanded ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                  style={{ borderLeftWidth: 4, borderLeftColor: color }}
-                >
-                  <div className="flex items-start justify-between gap-1">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-semibold text-gray-800 truncate">{label}</p>
-                      {showRaw && (
-                        <p className="text-[9px] text-gray-400 uppercase tracking-wide truncate">{d.department}</p>
-                      )}
-                    </div>
-                    <ChevronDown
-                      className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                    />
-                  </div>
-                  <p className="text-sm font-bold text-gray-900 mt-0.5">{fmtMoney(d.sales, true)}</p>
-                  <p className="text-[10px] text-gray-400">{fmtPct(d.marginPercent)} margin</p>
-                </button>
-              )
-            })}
+            {mainDepts.map(renderTile)}
+            {minorDepts.length > 0 && !showMinorDepts && (
+              <button
+                type="button"
+                onClick={() => setShowMinorDepts(true)}
+                className="rounded-lg bg-white border border-dashed border-gray-300 p-2.5 shadow-sm text-left hover:border-gray-400 hover:bg-gray-50 active:scale-[0.98] transition-all flex flex-col items-center justify-center gap-1"
+                aria-label="Show more departments"
+              >
+                <MoreHorizontal className="w-4 h-4 text-gray-400" />
+                <p className="text-[11px] font-semibold text-gray-600">
+                  More ({minorDepts.length})
+                </p>
+              </button>
+            )}
+            {showMinorDepts && minorDepts.map(renderTile)}
           </div>
+          {showMinorDepts && minorDepts.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowMinorDepts(false)}
+              className="mt-2 w-full text-[11px] text-gray-500 hover:text-gray-700 py-1"
+            >
+              Hide minor departments
+            </button>
+          )}
 
           {/* Expanded drill-down panel — top-velocity products for the tapped dept */}
           {expandedDept && (() => {
@@ -437,7 +483,15 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                     {items.map((item, i) => (
                       <li key={item.itemCode || i} className="px-3 py-2">
                         <div className="flex items-start gap-2">
-                          <span className="text-xs font-bold text-gray-400 w-5 text-right shrink-0 mt-0.5">{i + 1}</span>
+                          <span className="text-xs font-bold text-gray-400 w-5 text-right shrink-0 mt-1">{i + 1}</span>
+                          <ProductImage
+                            itemCode={item.itemCode}
+                            description={item.description}
+                            department={dept.department}
+                            barcode={item.barCode || null}
+                            size={44}
+                            className="shrink-0 rounded-md overflow-hidden"
+                          />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm text-gray-900 truncate leading-tight">{item.description.trim() || item.itemCode}</p>
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[10px]">
@@ -468,7 +522,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             )
           })()}
         </div>
-      )}
+        )
+      })()}
 
       {/* 5. Top 10 Velocity Products */}
       {topSellers.length > 0 && (
