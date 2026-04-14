@@ -143,7 +143,16 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         perDept: 5,
         days: 7,
       })
-      const items = res.byDepartment[rawName]?.top ?? []
+      // Defensive lookup: we asked for a single dept, so take the first (only)
+      // bucket regardless of its key. JARVISmart's department naming differs
+      // between /api/pos/departments and /api/pos/top-by-department (different
+      // DB joins → different casing/wording) — exact key match can miss.
+      const keys = Object.keys(res.byDepartment || {})
+      const bucket = res.byDepartment[rawName] ?? (keys.length > 0 ? res.byDepartment[keys[0]] : undefined)
+      const items = bucket?.top ?? []
+      if (!items.length) {
+        console.warn('[dashboard] no velocity items returned', { asked: rawName, serverKeys: keys, res })
+      }
       setDeptTopCache(prev => ({ ...prev, [rawName]: items }))
     } catch (err) {
       setDeptTopError((err as Error).message || 'Failed to load')
@@ -153,14 +162,19 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   }, [expandedDept, deptTopCache])
 
   // ── Derived: sorted departments ──
+  // Show ALL departments the server returned (not just ones with sales today),
+  // so hidden/zero-sales depts are visible. Sort by sales desc, then name.
   const sortedDepts = useMemo(
-    () => [...departments].filter(d => d.sales > 0).sort((a, b) => b.sales - a.sales),
+    () => [...departments].sort((a, b) => {
+      if (b.sales !== a.sales) return b.sales - a.sales
+      return a.department.localeCompare(b.department)
+    }),
     [departments],
   )
 
-  // ── Derived: chart data ──
+  // ── Derived: chart data (only non-zero sales — zero bars are noise) ──
   const chartData = useMemo(
-    () => sortedDepts.slice(0, 8).map(d => ({
+    () => sortedDepts.filter(d => d.sales > 0).slice(0, 8).map(d => ({
       name: deptLabel(d.department),
       revenue: Math.round(d.sales),
       color: deptColor(d.department),
