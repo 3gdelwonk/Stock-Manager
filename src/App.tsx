@@ -25,7 +25,25 @@ import { pruneImageCache } from './lib/db'
 // ─── Update banner ────────────────────────────────────────────────────────────
 
 function UpdateBanner() {
-  const { needRefresh: [needRefresh, setNeedRefresh], updateServiceWorker } = useRegisterSW()
+  const { needRefresh: [needRefresh, setNeedRefresh], updateServiceWorker } = useRegisterSW({
+    onRegisteredSW(_swUrl, registration) {
+      if (!registration) return
+      // Poll every 60s so the update banner appears while the PWA is open,
+      // even if the user never navigates. Also force a check as soon as
+      // the tab regains focus.
+      const tick = () => { registration.update().catch(() => {}) }
+      const id = setInterval(tick, 60_000)
+      const onVis = () => { if (document.visibilityState === 'visible') tick() }
+      document.addEventListener('visibilitychange', onVis)
+      window.addEventListener('focus', tick)
+      tick()
+      return () => {
+        clearInterval(id)
+        document.removeEventListener('visibilitychange', onVis)
+        window.removeEventListener('focus', tick)
+      }
+    },
+  })
   if (!needRefresh) return null
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-emerald-600 text-white shrink-0 gap-3">
