@@ -18,7 +18,6 @@ import {
   Minus,
   Plus,
   RefreshCw,
-  RotateCcw,
   ShoppingCart,
 } from 'lucide-react'
 import { generateForecasts, getSettings, type Forecast } from '../lib/forecastEngine'
@@ -161,7 +160,7 @@ const ForecastRow = memo(function ForecastRow({ forecast: f, qty, onChange }: Ro
           ) : (
             <button onClick={startEdit}
               className={`w-12 text-center text-sm font-semibold py-0.5 rounded ${
-                qty === 0 ? 'text-gray-300' : qty > f.suggestedQty * 1.5 ? 'text-amber-600' : 'text-gray-900'
+                qty === 0 ? 'text-gray-300' : 'text-gray-900'
               }`}
               aria-label="Edit quantity">
               {qty}
@@ -444,7 +443,7 @@ function BuildView({ onApproved, onCancel }: BuildViewProps) {
       setQtys((prev) => {
         const next = new Map(prev)
         for (const f of results) {
-          if (!next.has(f.productId)) next.set(f.productId, f.suggestedQty)
+          if (!next.has(f.productId)) next.set(f.productId, 0)
         }
         return next
       })
@@ -469,12 +468,6 @@ function BuildView({ onApproved, onCancel }: BuildViewProps) {
   const setQty = useCallback((productId: number, qty: number) => {
     setQtys((prev) => new Map(prev).set(productId, qty))
   }, [])
-
-  function resetToSuggested() {
-    const next = new Map<number, number>()
-    for (const f of forecasts) next.set(f.productId, f.suggestedQty)
-    setQtys(next)
-  }
 
   async function handleApprove() {
     const lines = forecasts
@@ -556,10 +549,6 @@ function BuildView({ onApproved, onCancel }: BuildViewProps) {
         </button>
         <p className="text-xs text-gray-500">{forecasts.length} products · {totalItems} to order</p>
         <div className="flex items-center gap-1.5">
-          <button onClick={resetToSuggested}
-            className="flex items-center gap-1 text-xs text-gray-500 px-2 py-1 rounded border border-gray-200">
-            <RotateCcw size={12} />Reset
-          </button>
           <button onClick={load}
             className="flex items-center gap-1 text-xs text-gray-500 px-2 py-1 rounded border border-gray-200">
             <RefreshCw size={12} />Refresh
