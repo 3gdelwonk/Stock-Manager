@@ -143,16 +143,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         perDept: 5,
         days: 7,
       })
-      // Defensive lookup: we asked for a single dept, so take the first (only)
-      // bucket regardless of its key. JARVISmart's department naming differs
-      // between /api/pos/departments and /api/pos/top-by-department (different
-      // DB joins → different casing/wording) — exact key match can miss.
-      const keys = Object.keys(res.byDepartment || {})
-      const bucket = res.byDepartment[rawName] ?? (keys.length > 0 ? res.byDepartment[keys[0]] : undefined)
+      // We asked for one dept, so take the first (only) bucket regardless of
+      // the exact key the server echoes back.
+      const bucket = Object.values(res.byDepartment || {})[0]
       const items = bucket?.top ?? []
-      if (!items.length) {
-        console.warn('[dashboard] no velocity items returned', { asked: rawName, serverKeys: keys, res })
-      }
       setDeptTopCache(prev => ({ ...prev, [rawName]: items }))
     } catch (err) {
       setDeptTopError((err as Error).message || 'Failed to load')
@@ -356,6 +350,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             {sortedDepts.map(d => {
               const color = deptColor(d.department)
               const isExpanded = expandedDept === d.department
+              const label = deptLabel(d.department)
+              const showRaw = label.toUpperCase() !== d.department.toUpperCase()
               return (
                 <button
                   key={d.code}
@@ -368,7 +364,12 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                   style={{ borderLeftWidth: 4, borderLeftColor: color }}
                 >
                   <div className="flex items-start justify-between gap-1">
-                    <p className="text-xs font-semibold text-gray-800 truncate flex-1">{deptLabel(d.department)}</p>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold text-gray-800 truncate">{label}</p>
+                      {showRaw && (
+                        <p className="text-[9px] text-gray-400 uppercase tracking-wide truncate">{d.department}</p>
+                      )}
+                    </div>
                     <ChevronDown
                       className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
                     />
@@ -396,6 +397,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                     <Zap className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                     <p className="text-xs font-semibold text-gray-700 truncate">
                       Fastest moving · {deptLabel(dept.department)}
+                      {deptLabel(dept.department).toUpperCase() !== dept.department.toUpperCase() && (
+                        <span className="ml-1 text-[10px] text-gray-400 font-normal">({dept.department})</span>
+                      )}
                     </p>
                   </div>
                   <span className="text-[10px] text-gray-400 shrink-0">Last 7 days</span>
