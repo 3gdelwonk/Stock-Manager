@@ -519,7 +519,7 @@ export default function StoreLocationManager({ open, onClose }: Props) {
   return (
     <>
       <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
-      <div className="fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-2xl shadow-2xl max-h-[92vh] flex flex-col">
+      <div className="fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-2xl shadow-2xl h-[60vh] flex flex-col">
         {/* Handle + header */}
         <div className="flex justify-center pt-3 pb-1 shrink-0"><div className="w-10 h-1 bg-gray-300 rounded-full" /></div>
         <div className="flex items-center justify-between px-4 pb-3 border-b border-gray-100 shrink-0">
