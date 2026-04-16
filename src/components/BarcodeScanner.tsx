@@ -97,18 +97,25 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     trackRef.current  = null
     activeRef.current = true
 
-    const configuration = {
+    // NOTE: html5-qrcode takes full ownership of camera constraints via
+    // `videoConstraints` — anything passed as the FIRST argument of start()
+    // (the `cameraIdOrConfig`) is silently overridden when videoConstraints
+    // is present. So facingMode/deviceId MUST live inside videoConstraints.
+    // Putting it only in the first arg means every call opens the browser's
+    // default cam (usually front). We rebuild videoConstraints per iteration
+    // with the specific candidate's selector merged in.
+    const baseVideoConstraints = {
+      width:     { min: 640, ideal: 1920 },
+      height:    { min: 480, ideal: 1080 },
+      frameRate: { ideal: 30, max: 60 },
+    } as const
+    const baseConfig = {
       fps: 20,
       // Wide, short box matches the 3.5:1 aspect of EAN-13 / UPC-A.
       // More horizontal pixels captured → better bar resolution at distance.
       qrbox: { width: 340, height: 160 },
       aspectRatio: 1.7778,     // 16:9 widescreen → full horizontal resolution
       disableFlip: true,        // 1D barcodes don't need mirror check; saves CPU
-      videoConstraints: {
-        width:     { min: 640, ideal: 1920 },
-        height:    { min: 480, ideal: 1080 },
-        frameRate: { ideal: 30, max: 60 },
-      } as MediaTrackConstraints,
     }
 
     // experimentalFeatures.useBarCodeDetectorIfSupported — on Chrome/Android this
@@ -250,9 +257,21 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
           ? `dev:${cand.deviceId.slice(0, 8)}…${cand.label ? ` [${cand.label}]` : ''}`
           : 'facingMode:environment'
 
-        const selector: MediaTrackConstraints = cand.kind === 'device'
+        // First arg must be a 1-key object (html5-qrcode validates this),
+        // but remember: videoConstraints below is what actually sticks.
+        const firstArg: MediaTrackConstraints = cand.kind === 'device'
           ? { deviceId: { exact: cand.deviceId } }
           : { facingMode: { exact: 'environment' } }
+
+        // The selector MUST also live inside videoConstraints — that's where
+        // html5-qrcode reads the real camera selection from. Without this,
+        // the browser picks its default cam (usually front) and ignores the
+        // first arg entirely.
+        const videoConstraints: MediaTrackConstraints = cand.kind === 'device'
+          ? { deviceId: { exact: cand.deviceId }, ...baseVideoConstraints }
+          : { facingMode: { exact: 'environment' }, ...baseVideoConstraints }
+
+        const iterationConfig = { ...baseConfig, videoConstraints }
 
         // Fresh instance per iteration — avoids the html5-qrcode stop/start
         // camera-sticking bug where reusing one instance keeps the first
@@ -262,8 +281,8 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
 
         try {
           await s.start(
-            selector as unknown as MediaTrackConstraints,
-            configuration,
+            firstArg as unknown as MediaTrackConstraints,
+            iterationConfig,
             onDecode,
             () => {},
           )
