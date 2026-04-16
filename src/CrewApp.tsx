@@ -1,9 +1,10 @@
 import { Component, useState, type ReactNode } from 'react'
-import { Search, Clock, Printer, DollarSign } from 'lucide-react'
+import { Search, Clock, Printer, DollarSign, MapPin } from 'lucide-react'
 import CrewLookup from './components/crew/CrewLookup'
 import CrewExpiry from './components/crew/CrewExpiry'
 import CrewPrint from './components/crew/CrewPrint'
 import CrewPrice from './components/crew/CrewPrice'
+import CrewBulkLocation from './components/crew/CrewBulkLocation'
 
 // ─── Error boundary ───────────────────────────────────────────────────────────
 
@@ -31,13 +32,14 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'lookup' | 'expiry' | 'print' | 'price'
+type Tab = 'lookup' | 'expiry' | 'print' | 'price' | 'locate'
 
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'lookup', label: 'Lookup',  icon: <Search size={16} /> },
   { id: 'expiry', label: 'Expiry',  icon: <Clock size={16} /> },
   { id: 'print',  label: 'Print',   icon: <Printer size={16} /> },
   { id: 'price',  label: 'Price',   icon: <DollarSign size={16} /> },
+  { id: 'locate', label: 'Locate',  icon: <MapPin size={16} /> },
 ]
 
 const TAB_TITLES: Record<Tab, string> = {
@@ -45,6 +47,7 @@ const TAB_TITLES: Record<Tab, string> = {
   expiry: 'Add Expiry',
   print:  'Print Label',
   price:  'Price Change',
+  locate: 'Bulk Location',
 }
 
 const LAST_TAB_KEY = 'crew-app-last-tab'
@@ -67,6 +70,7 @@ export default function CrewApp() {
       case 'expiry': return <CrewExpiry />
       case 'print':  return <CrewPrint />
       case 'price':  return <CrewPrice />
+      case 'locate': return <CrewBulkLocation />
     }
   }
 

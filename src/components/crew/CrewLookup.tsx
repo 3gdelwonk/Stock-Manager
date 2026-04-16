@@ -1,6 +1,13 @@
-import { useState, useCallback } from 'react'
-import { Search, ScanBarcode, Package, X } from 'lucide-react'
-import { searchItems, type StockItem, getStockLevels } from '../../lib/jarvis'
+import { useState, useEffect, useCallback } from 'react'
+import { Search, ScanBarcode, Package, X, Plus, Pencil, Trash2, MapPin } from 'lucide-react'
+import {
+  searchItems, type StockItem, getStockLevels,
+  getLocations, getItemLocations, assignItemToLocation, removeItemFromLocation,
+  type ItemLocation,
+} from '../../lib/jarvis'
+import { flattenLocations, buildItemBreadcrumb, LEVEL_ORDER, TYPE_LABELS } from '../../lib/locationUtils'
+import type { FlatLocation } from '../../lib/locationUtils'
+import LocationCascade, { useCascadeState } from '../LocationCascade'
 import BarcodeScanner from '../BarcodeScanner'
 import ProductImage from '../ProductImage'
 
@@ -22,6 +29,79 @@ export default function CrewLookup() {
   const [scannerOpen, setScannerOpen] = useState(false)
   const [selected, setSelected] = useState<LookupResult | null>(null)
   const [searched, setSearched] = useState(false)
+
+  // ── Per-product location state ──
+  const [serverLocs, setServerLocs] = useState<ItemLocation[]>([])
+  const [flatLocs, setFlatLocs] = useState<FlatLocation[]>([])
+  const [locBusy, setLocBusy] = useState(false)
+  const [locPickerOpen, setLocPickerOpen] = useState(false)
+  const [editingLocId, setEditingLocId] = useState<number | null>(null)
+  const [locMsg, setLocMsg] = useState<string | null>(null)
+  const cascade = useCascadeState()
+
+  // Load server locations + flat tree whenever a product is selected
+  useEffect(() => {
+    if (!selected) {
+      setServerLocs([])
+      setLocPickerOpen(false)
+      setEditingLocId(null)
+      cascade.reset()
+      setLocMsg(null)
+      return
+    }
+    getItemLocations(selected.itemCode).then(setServerLocs).catch(() => setServerLocs([]))
+    if (flatLocs.length === 0) {
+      getLocations().then(tree => setFlatLocs(flattenLocations(tree))).catch(() => {})
+    }
+  }, [selected?.itemCode])
+
+  // Auto-dismiss transient messages
+  useEffect(() => {
+    if (!locMsg) return
+    const id = setTimeout(() => setLocMsg(null), 2000)
+    return () => clearTimeout(id)
+  }, [locMsg])
+
+  async function handleAssignLocation() {
+    if (!selected) return
+    const targetId = cascade.resolveTarget()
+    if (!targetId) return
+    setLocBusy(true)
+    try {
+      if (editingLocId) {
+        await removeItemFromLocation(editingLocId, selected.itemCode)
+      }
+      await assignItemToLocation(targetId, selected.itemCode)
+      const updated = await getItemLocations(selected.itemCode)
+      setServerLocs(updated)
+      cascade.reset()
+      setLocPickerOpen(false)
+      setEditingLocId(null)
+      setLocMsg(editingLocId ? 'Location changed' : 'Location assigned')
+    } catch (err) {
+      setLocMsg(`Failed: ${(err as Error).message}`)
+      if (editingLocId) {
+        getItemLocations(selected.itemCode).then(setServerLocs).catch(() => {})
+      }
+    } finally {
+      setLocBusy(false)
+    }
+  }
+
+  async function handleRemoveLocation(locId: number) {
+    if (!selected) return
+    setLocBusy(true)
+    try {
+      await removeItemFromLocation(locId, selected.itemCode)
+      const updated = await getItemLocations(selected.itemCode)
+      setServerLocs(updated)
+      setLocMsg('Location removed')
+    } catch (err) {
+      setLocMsg(`Remove failed: ${(err as Error).message}`)
+    } finally {
+      setLocBusy(false)
+    }
+  }
 
   const doSearch = useCallback(async (q: string) => {
     const trimmed = q.trim()
@@ -178,6 +258,110 @@ export default function CrewLookup() {
                   <span>Status</span>
                   <span className="font-medium text-emerald-600">On Reorder</span>
                 </div>
+              )}
+            </div>
+
+            {/* ── Store Locations ── */}
+            <div className="bg-indigo-50/40 rounded-xl p-3 space-y-2 border border-indigo-100">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wider flex items-center gap-1">
+                  <MapPin size={11} /> Store Locations
+                </p>
+                {!locPickerOpen && (
+                  <button
+                    onClick={() => { setLocPickerOpen(true); setEditingLocId(null); cascade.reset() }}
+                    className="flex items-center gap-0.5 text-[11px] font-medium text-indigo-600 hover:text-indigo-700"
+                  >
+                    <Plus size={12} /> Add Location
+                  </button>
+                )}
+              </div>
+
+              {/* Current assignments */}
+              {serverLocs.length > 0 ? (
+                <div className="space-y-1.5">
+                  {serverLocs.map((sl, i) => {
+                    const crumbs = buildItemBreadcrumb(sl, flatLocs)
+                    return (
+                      <div key={i} className="flex items-center gap-1.5 bg-white rounded-lg px-2 py-1.5 border border-indigo-50">
+                        <div className="flex-1 grid grid-cols-4 gap-1 text-[10px]">
+                          {LEVEL_ORDER.map(tid => {
+                            const cell = crumbs[tid]
+                            return (
+                              <div key={tid} className="text-center">
+                                <span className="text-[8px] text-gray-400 block">{TYPE_LABELS[tid]}</span>
+                                <span className={`font-medium ${cell.shortCode ? 'text-gray-700' : 'text-gray-300'}`}>
+                                  {cell.shortCode || cell.name || '—'}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        <button
+                          onClick={() => {
+                            setEditingLocId(sl.locationId)
+                            cascade.reset()
+                            setLocPickerOpen(true)
+                          }}
+                          className="p-1 text-gray-400 hover:text-indigo-600"
+                          title="Change location"
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          onClick={() => handleRemoveLocation(sl.locationId)}
+                          disabled={locBusy}
+                          className="p-1 text-gray-400 hover:text-red-600 disabled:opacity-50"
+                          title="Remove location"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-[11px] text-gray-400 text-center py-1">No store locations assigned</p>
+              )}
+
+              {/* Cascade picker */}
+              {locPickerOpen && (
+                <div className="border-t border-indigo-100 pt-2 space-y-2">
+                  <p className="text-[11px] font-medium text-gray-600">
+                    {editingLocId ? 'Change to:' : 'Assign to:'}
+                  </p>
+                  <LocationCascade
+                    flatLocations={flatLocs}
+                    busy={locBusy}
+                    zoneId={cascade.zoneId}
+                    aisleId={cascade.aisleId}
+                    bayId={cascade.bayId}
+                    rowId={cascade.rowId}
+                    onZoneChange={cascade.setZoneId}
+                    onAisleChange={cascade.setAisleId}
+                    onBayChange={cascade.setBayId}
+                    onRowChange={cascade.setRowId}
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAssignLocation}
+                      disabled={!cascade.hasInput || locBusy}
+                      className="flex-1 bg-indigo-600 text-white text-xs font-medium py-2 rounded-lg disabled:opacity-50 hover:bg-indigo-700"
+                    >
+                      {locBusy ? 'Saving...' : editingLocId ? 'Change' : 'Assign'}
+                    </button>
+                    <button
+                      onClick={() => { setLocPickerOpen(false); setEditingLocId(null); cascade.reset() }}
+                      className="px-3 bg-gray-200 text-gray-700 text-xs font-medium py-2 rounded-lg"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {locMsg && (
+                <p className="text-[10px] text-indigo-600 text-center">{locMsg}</p>
               )}
             </div>
 

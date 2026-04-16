@@ -4,7 +4,8 @@ import {
   AlertCircle, ChevronRight, Package,
 } from 'lucide-react'
 import {
-  searchItems, getLocations, getItemLocations,
+  searchItemsSmart, barcodeVariants, searchItems,
+  getLocations, getItemLocations,
   bulkAssignItems, assignItemToLocation,
 } from '../lib/jarvis'
 import { flattenLocations } from '../lib/locationUtils'
@@ -31,21 +32,6 @@ interface AssignResult {
 }
 
 type Step = 'build' | 'assign' | 'done'
-
-// ── Barcode variants for UPC-A/EAN-13 interop ──────────────────────────────
-
-function barcodeVariants(code: string): string[] {
-  const variants = [code]
-  const digits = code.replace(/\D/g, '')
-  if (digits !== code) variants.push(digits)
-  // Strip leading zeros
-  const stripped = digits.replace(/^0+/, '')
-  if (stripped && stripped !== digits) variants.push(stripped)
-  // Add leading zero
-  const padded = '0' + digits
-  if (padded !== digits) variants.push(padded)
-  return [...new Set(variants)]
-}
 
 // ── Component ───────────────────────────────────────────────────────────────
 
@@ -97,14 +83,14 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
     }
   }, [open])
 
-  // Search with debounce
+  // Search with debounce — smart search tries barcode variants for digit-only input
   useEffect(() => {
     if (!query.trim()) { setResults([]); return }
     if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(async () => {
       setLoading(true)
       try {
-        const res = await searchItems(query.trim(), 8)
+        const res = await searchItemsSmart(query.trim(), 8)
         setResults(res.items.map(i => ({
           itemCode: i.itemCode,
           barcode: i.barcode,
@@ -116,6 +102,41 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
     }, 300)
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
   }, [query])
+
+  // Pressing Enter treats input like a barcode scan — try variants,
+  // auto-queue the best match. Handles typed 6-digit ordercodes and
+  // 12-13 digit barcodes without waiting for the live search pass.
+  async function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    const trimmed = query.trim()
+    if (!trimmed) return
+
+    const hit =
+      results.find(r => r.itemCode === trimmed) ||
+      results.find(r => r.barcode === trimmed) ||
+      (results.length === 1 ? results[0] : null)
+    if (hit) { addToQueue(hit); return }
+
+    const variants = /^\d+$/.test(trimmed) ? barcodeVariants(trimmed) : [trimmed]
+    setLoading(true)
+    try {
+      for (const v of variants) {
+        const res = await searchItems(v, 3).catch(() => null)
+        if (res && res.items.length > 0) {
+          const item = res.items[0]
+          addToQueue({
+            itemCode: item.itemCode,
+            barcode: item.barcode,
+            name: item.description,
+            department: item.department,
+          })
+          return
+        }
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
 
   function addToQueue(item: QueueItem) {
     if (queue.some(q => q.itemCode === item.itemCode)) return
@@ -267,25 +288,27 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
           <div className="flex-1 overflow-y-auto">
             {/* Search bar */}
             <div className="px-4 pt-3 pb-2 space-y-2">
-              <div className="flex gap-2">
+              <form onSubmit={handleSearchSubmit} className="flex gap-2">
                 <div className="flex-1 relative">
                   <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
-                    type="text"
+                    type="search"
+                    inputMode="search"
                     value={query}
                     onChange={e => setQuery(e.target.value)}
-                    placeholder="Search items or scan barcode..."
+                    placeholder="Scan, type barcode or ordercode..."
                     className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
                     autoFocus
                   />
                 </div>
                 <button
+                  type="button"
                   onClick={() => setScannerOpen(true)}
                   className="px-3 bg-gray-100 rounded-lg hover:bg-gray-200 text-gray-600"
                 >
                   <ScanBarcode size={18} />
                 </button>
-              </div>
+              </form>
 
               {/* Search results */}
               {loading && <p className="text-xs text-gray-400 text-center py-1 animate-pulse">Searching...</p>}

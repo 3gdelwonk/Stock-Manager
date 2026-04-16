@@ -530,6 +530,48 @@ export async function searchItems(query: string, limit = 20): Promise<SearchResu
   }
 }
 
+// ── Smart search: handles 6-digit ordercodes and 12-13 digit barcodes ──────
+// Tries the raw query, then UPC-A/EAN-13 variants (strip / pad leading zero)
+// for digit-only inputs. Results are merged and deduped by itemCode.
+
+export function barcodeVariants(code: string): string[] {
+  const variants = [code]
+  const digits = code.replace(/\D/g, '')
+  if (digits && digits !== code) variants.push(digits)
+  const stripped = digits.replace(/^0+/, '')
+  if (stripped && stripped !== digits) variants.push(stripped)
+  const padded = '0' + digits
+  if (digits && padded !== digits) variants.push(padded)
+  return [...new Set(variants)]
+}
+
+export async function searchItemsSmart(query: string, limit = 20): Promise<SearchResult> {
+  const trimmed = query.trim()
+  if (!trimmed) return { items: [], total: 0 }
+
+  // Always run the raw query first
+  const primary = await searchItems(trimmed, limit).catch(() => ({ items: [], total: 0 } as SearchResult))
+
+  // If primary already has good matches, or query isn't digit-only, return it
+  const isDigits = /^\d+$/.test(trimmed)
+  if (primary.items.length > 0 || !isDigits) return primary
+
+  // Digit-only with zero hits → try barcode variants (skip the raw query we already tried)
+  const variants = barcodeVariants(trimmed).filter(v => v !== trimmed)
+  const seen = new Set<string>()
+  const merged: SearchResult['items'] = []
+  for (const v of variants) {
+    try {
+      const res = await searchItems(v, limit)
+      for (const it of res.items) {
+        if (!seen.has(it.itemCode)) { seen.add(it.itemCode); merged.push(it) }
+      }
+      if (merged.length >= limit) break
+    } catch { /* try next variant */ }
+  }
+  return { items: merged.slice(0, limit), total: merged.length }
+}
+
 // ── Order / Supplier info ──────────────────────────────────────────────────
 
 export interface SupplierInfo {
