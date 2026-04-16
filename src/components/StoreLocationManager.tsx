@@ -5,8 +5,7 @@ import {
 } from 'lucide-react'
 import {
   getLocationTypes, getLocations, createLocation, updateLocation, deleteLocation,
-  getLocationItems, assignItemToLocation, removeItemFromLocation,
-  bulkAssignItems, assignDepartmentToLocation, moveItemToLocation, bulkMoveItems,
+  getLocationItems, removeItemFromLocation, bulkAssignItems,
   searchItems,
   type LocationType, type StoreLocation, type LocationItem,
 } from '../lib/jarvis'
@@ -102,7 +101,6 @@ export default function StoreLocationManager({ open, onClose }: Props) {
   // Items panel state
   const [selectedItems, setSelectedItems] = useState<LocationItem[]>([])
   const [itemsLoading, setItemsLoading] = useState(false)
-  const [assignMode, setAssignMode] = useState<'item' | 'bulk' | 'dept' | 'move' | null>(null)
   const [assignQuery, setAssignQuery] = useState('')
   const [assigning, setAssigning] = useState(false)
   const [assignResult, setAssignResult] = useState<string | null>(null)
@@ -179,7 +177,7 @@ export default function StoreLocationManager({ open, onClose }: Props) {
   // When focused target changes, load its items
   const selectedId = selected?.id ?? null
   useEffect(() => {
-    if (selectedId == null) { setSelectedItems([]); setAssignMode(null); return }
+    if (selectedId == null) { setSelectedItems([]); setAssignQuery(''); setAssignResult(null); return }
     setItemsLoading(true)
     getLocationItems(selectedId)
       .then(setSelectedItems)
@@ -282,24 +280,7 @@ export default function StoreLocationManager({ open, onClose }: Props) {
     }
   }
 
-  // ── Assign items ──────────────────────────────────────────────────────
-  async function handleAssignItem() {
-    if (!selected || !assignQuery.trim()) return
-    setAssigning(true)
-    setAssignResult(null)
-    try {
-      const itemCode = await resolveToItemCode(assignQuery.trim())
-      await assignItemToLocation(selected.id, itemCode)
-      const items = await getLocationItems(selected.id)
-      setSelectedItems(items)
-      setAssignQuery('')
-      setAssignResult('Item assigned')
-    } catch (e) {
-      setError((e as Error).message)
-    }
-    setAssigning(false)
-  }
-
+  // ── Assign items (bulk only — accepts comma/space-separated codes) ────
   async function handleBulkAssign() {
     if (!selected || !assignQuery.trim()) return
     const raw = assignQuery.split(/[,\s]+/).map(c => c.trim()).filter(Boolean)
@@ -315,46 +296,6 @@ export default function StoreLocationManager({ open, onClose }: Props) {
       const assigned = res.assigned ?? codes.length
       const skipped = codes.length - assigned
       setAssignResult(skipped > 0 ? `${assigned} assigned (${skipped} already there)` : `${assigned} items assigned`)
-    } catch (e) {
-      setError((e as Error).message)
-    }
-    setAssigning(false)
-  }
-
-  async function handleAssignDept() {
-    if (!selected || !assignQuery.trim()) return
-    setAssigning(true)
-    setAssignResult(null)
-    try {
-      const res = await assignDepartmentToLocation(selected.id, assignQuery.trim())
-      const items = await getLocationItems(selected.id)
-      setSelectedItems(items)
-      setAssignQuery('')
-      const deptAssigned = res.assigned ?? 0
-      setAssignResult(deptAssigned === 0 ? `All items already in this location` : `${deptAssigned} items from ${assignQuery.trim()} assigned`)
-    } catch (e) {
-      setError((e as Error).message)
-    }
-    setAssigning(false)
-  }
-
-  async function handleMoveItems() {
-    if (!selected || !assignQuery.trim()) return
-    const raw = assignQuery.split(/[,\s]+/).map(c => c.trim()).filter(Boolean)
-    if (raw.length === 0) return
-    setAssigning(true)
-    setAssignResult(null)
-    try {
-      const codes = await resolveCodes(raw)
-      if (codes.length === 1) {
-        await moveItemToLocation(selected.id, codes[0])
-      } else {
-        await bulkMoveItems(selected.id, codes)
-      }
-      const items = await getLocationItems(selected.id)
-      setSelectedItems(items)
-      setAssignQuery('')
-      setAssignResult(`${codes.length} item${codes.length !== 1 ? 's' : ''} moved here`)
     } catch (e) {
       setError((e as Error).message)
     }
@@ -616,78 +557,36 @@ export default function StoreLocationManager({ open, onClose }: Props) {
                       <p className="text-xs font-semibold text-gray-500 uppercase flex items-center gap-1">
                         <Package size={10} /> Items ({selectedItems.length})
                       </p>
-                      <div className="flex gap-1 flex-wrap">
-                        {([
-                          { mode: 'item' as const, label: '+ Item', active: 'bg-indigo-100 text-indigo-700' },
-                          { mode: 'bulk' as const, label: '+ Bulk', active: 'bg-blue-100 text-blue-700' },
-                          { mode: 'dept' as const, label: '+ Dept', active: 'bg-amber-100 text-amber-700' },
-                          { mode: 'move' as const, label: 'Move', active: 'bg-emerald-100 text-emerald-700' },
-                        ]).map(({ mode, label, active }) => (
-                          <button
-                            key={mode}
-                            onClick={() => { setAssignMode(assignMode === mode ? null : mode); setAssignQuery(''); setAssignResult(null) }}
-                            className={`px-2 py-0.5 text-[10px] font-medium rounded ${assignMode === mode ? active : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
                     </div>
 
-                    {/* Assign form */}
-                    {assignMode && (
-                      <div className="mb-2 space-y-1.5">
-                        <div className="flex gap-2">
-                          <div className="flex-1 flex items-center gap-1.5 bg-gray-100 rounded-lg px-2.5 py-1.5">
-                            <Search size={12} className="text-gray-400 shrink-0" />
-                            <input
-                              value={assignQuery}
-                              onChange={e => setAssignQuery(e.target.value)}
-                              onKeyDown={e => {
-                                if (e.key !== 'Enter') return
-                                if (assignMode === 'item') handleAssignItem()
-                                else if (assignMode === 'bulk') handleBulkAssign()
-                                else if (assignMode === 'dept') handleAssignDept()
-                                else if (assignMode === 'move') handleMoveItems()
-                              }}
-                              placeholder={
-                                assignMode === 'item' ? 'Item code...' :
-                                assignMode === 'bulk' ? 'Item codes (comma or space separated)...' :
-                                assignMode === 'dept' ? 'Department name (e.g. GROCERY)...' :
-                                'Item codes to move here...'
-                              }
-                              className="flex-1 bg-transparent text-xs outline-none"
-                              autoFocus
-                            />
-                          </div>
-                          <button
-                            onClick={
-                              assignMode === 'item' ? handleAssignItem :
-                              assignMode === 'bulk' ? handleBulkAssign :
-                              assignMode === 'dept' ? handleAssignDept :
-                              handleMoveItems
-                            }
-                            disabled={assigning || !assignQuery.trim()}
-                            className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg disabled:opacity-50"
-                          >
-                            {assigning ? '...' :
-                              assignMode === 'item' ? 'Assign' :
-                              assignMode === 'bulk' ? 'Assign All' :
-                              assignMode === 'dept' ? 'Assign Dept' :
-                              'Move'}
-                          </button>
+                    {/* Bulk-assign form (the only assignment flow) */}
+                    <div className="mb-3 space-y-1.5">
+                      <div className="flex gap-2">
+                        <div className="flex-1 flex items-center gap-1.5 bg-gray-100 rounded-lg px-2.5 py-1.5">
+                          <Search size={12} className="text-gray-400 shrink-0" />
+                          <input
+                            value={assignQuery}
+                            onChange={e => setAssignQuery(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') handleBulkAssign() }}
+                            placeholder="Item codes (comma or space separated)..."
+                            className="flex-1 bg-transparent text-xs outline-none"
+                          />
                         </div>
-                        {assignResult && (
-                          <p className="text-[10px] text-emerald-600 flex items-center gap-1"><Check size={10} /> {assignResult}</p>
-                        )}
-                        <p className="text-[9px] text-gray-400">
-                          {assignMode === 'item' && 'Assign a single item by its item code'}
-                          {assignMode === 'bulk' && 'Paste or type multiple item codes separated by commas or spaces'}
-                          {assignMode === 'dept' && 'Assign all items from a department to this location'}
-                          {assignMode === 'move' && 'Move items from their current location to this one'}
-                        </p>
+                        <button
+                          onClick={handleBulkAssign}
+                          disabled={assigning || !assignQuery.trim()}
+                          className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg disabled:opacity-50"
+                        >
+                          {assigning ? '...' : 'Assign All'}
+                        </button>
                       </div>
-                    )}
+                      {assignResult && (
+                        <p className="text-[10px] text-emerald-600 flex items-center gap-1"><Check size={10} /> {assignResult}</p>
+                      )}
+                      <p className="text-[9px] text-gray-400">
+                        Paste or type multiple item codes separated by commas or spaces
+                      </p>
+                    </div>
 
                     {itemsLoading ? (
                       <div className="flex justify-center py-4"><Loader2 size={16} className="text-gray-400 animate-spin" /></div>

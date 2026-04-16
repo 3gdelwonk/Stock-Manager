@@ -1577,7 +1577,26 @@ export async function deleteLocation(id: number): Promise<{ success: boolean }> 
 }
 
 export async function getItemLocations(itemCode: string): Promise<ItemLocation[]> {
-  return jarvisFetch<ItemLocation[]>(`/api/pos/locations/item/${encodeURIComponent(itemCode)}`)
+  // Backend has historically varied the ID key name & type across releases
+  // (`locationId`, `locationID`, `location_id`, `id`, and occasionally
+  // stringified numbers). Downstream code compares against a known numeric
+  // targetId, so any one mismatch silently flips an assignment from
+  // "success" to "failed" in the UI while the row is sitting in the DB.
+  // Normalise here so every consumer (verify loop, "already at target"
+  // chip, StockView, CrewLookup) sees a canonical numeric `locationId`.
+  const raw = await jarvisFetch<Array<Record<string, unknown>>>(
+    `/api/pos/locations/item/${encodeURIComponent(itemCode)}`,
+  )
+  return raw.map(r => {
+    const rawId = r.locationId ?? r.locationID ?? r.location_id ?? r.id
+    const num = typeof rawId === 'string' ? parseInt(rawId, 10) : (rawId as number)
+    return {
+      ...r,
+      locationId: Number.isFinite(num) ? num : 0,
+      name:      String(r.name ?? r.locationName ?? r.displayName ?? ''),
+      shortCode: String(r.shortCode ?? r.short_code ?? ''),
+    } as ItemLocation
+  })
 }
 
 export async function getLocationItems(locationId: number): Promise<LocationItem[]> {

@@ -7,8 +7,9 @@ import {
   searchItemsSmart, barcodeVariants, searchItems,
   getLocations, getItemLocations,
   bulkAssignItems, assignItemToLocation,
+  type ItemLocation,
 } from '../lib/jarvis'
-import { flattenLocations } from '../lib/locationUtils'
+import { flattenLocations, formatLocPath } from '../lib/locationUtils'
 import type { FlatLocation } from '../lib/locationUtils'
 import LocationCascade, { useCascadeState } from './LocationCascade'
 import BarcodeScanner from './BarcodeScanner'
@@ -21,6 +22,7 @@ interface QueueItem {
   barcode: string | null
   name: string
   department: string
+  existingLocs?: ItemLocation[]    // undefined = not loaded yet
 }
 
 type ResultStatus = 'new' | 'already' | 'failed'
@@ -50,6 +52,8 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
   const [scannerOpen, setScannerOpen] = useState(false)
   const [queue, setQueue] = useState<QueueItem[]>([])
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const searchSeq = useRef(0)
+  const locCache = useRef(new Map<string, ItemLocation[]>())
 
   // Location picker
   const [flatLocs, setFlatLocs] = useState<FlatLocation[]>([])
@@ -80,32 +84,66 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
     if (!open) {
       setStep('build'); setQuery(''); setResults([]); setQueue([])
       cascade.reset(); setAssignResults([]); setProgress({ done: 0, total: 0 })
+      locCache.current.clear()
     }
   }, [open])
+
+  // Fetch + cache existing locations for a single item code.
+  async function fetchLocs(code: string): Promise<ItemLocation[]> {
+    const cached = locCache.current.get(code)
+    if (cached) return cached
+    try {
+      const locs = await getItemLocations(code)
+      locCache.current.set(code, locs)
+      return locs
+    } catch {
+      return []
+    }
+  }
+
+  async function enrichWithLocations(
+    items: QueueItem[],
+    setter: (updater: (prev: QueueItem[]) => QueueItem[]) => void,
+    seq?: number,
+  ) {
+    await Promise.all(items.map(async item => {
+      const locs = await fetchLocs(item.itemCode)
+      if (seq !== undefined && seq !== searchSeq.current) return
+      setter(prev => prev.map(r =>
+        r.itemCode === item.itemCode && r.existingLocs === undefined
+          ? { ...r, existingLocs: locs }
+          : r
+      ))
+    }))
+  }
 
   // Search with debounce — smart search tries barcode variants for digit-only input
   useEffect(() => {
     if (!query.trim()) { setResults([]); return }
     if (searchTimer.current) clearTimeout(searchTimer.current)
     searchTimer.current = setTimeout(async () => {
+      const seq = ++searchSeq.current
       setLoading(true)
       try {
         const res = await searchItemsSmart(query.trim(), 8)
-        setResults(res.items.map(i => ({
+        if (seq !== searchSeq.current) return
+        const mapped: QueueItem[] = res.items.map(i => ({
           itemCode: i.itemCode,
           barcode: i.barcode,
           name: i.description,
           department: i.department,
-        })))
+          existingLocs: locCache.current.get(i.itemCode),
+        }))
+        setResults(mapped)
+        const toFetch = mapped.filter(m => m.existingLocs === undefined)
+        if (toFetch.length > 0) enrichWithLocations(toFetch, setResults, seq)
       } catch { setResults([]) }
       setLoading(false)
     }, 300)
     return () => { if (searchTimer.current) clearTimeout(searchTimer.current) }
   }, [query])
 
-  // Pressing Enter treats input like a barcode scan — try variants,
-  // auto-queue the best match. Handles typed 6-digit ordercodes and
-  // 12-13 digit barcodes without waiting for the live search pass.
+  // Pressing Enter treats input like a barcode scan
   async function handleSearchSubmit(e: React.FormEvent) {
     e.preventDefault()
     const trimmed = query.trim()
@@ -140,9 +178,19 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
 
   function addToQueue(item: QueueItem) {
     if (queue.some(q => q.itemCode === item.itemCode)) return
-    setQueue(prev => [...prev, item])
+    const next: QueueItem = { ...item, existingLocs: item.existingLocs ?? locCache.current.get(item.itemCode) }
+    setQueue(prev => [...prev, next])
     setQuery('')
     setResults([])
+    if (next.existingLocs === undefined) {
+      fetchLocs(next.itemCode).then(locs => {
+        setQueue(prev => prev.map(q =>
+          q.itemCode === next.itemCode && q.existingLocs === undefined
+            ? { ...q, existingLocs: locs }
+            : q
+        ))
+      })
+    }
   }
 
   function removeFromQueue(itemCode: string) {
@@ -167,7 +215,6 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
         }
       } catch { /* try next variant */ }
     }
-    // Fallback: add raw barcode
     addToQueue({ itemCode: barcode, barcode, name: barcode, department: '' })
   }
 
@@ -179,7 +226,6 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
     const allCodes = queue.map(q => q.itemCode)
     setProgress({ done: 0, total: allCodes.length })
 
-    // Snapshot pre-assign locations
     const preLocs: Record<string, Set<number>> = {}
     await Promise.all(allCodes.map(async code => {
       try {
@@ -190,45 +236,52 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
       }
     }))
 
-    // First pass: bulk assign
     try {
       await bulkAssignItems(targetId, allCodes)
     } catch { /* continue to verify */ }
 
-    // Verify: re-fetch all item locations
+    // Verify: re-fetch item locations. POS can lag a few hundred ms between
+    // committing the write and having it visible on the read path, so miss
+    // once → wait → re-read once before marking as failed. Without this, a
+    // successful DB write gets reported as "failed" in the UI.
+    const verifyAt = async (code: string): Promise<boolean> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const postLocs = await getItemLocations(code)
+          locCache.current.set(code, postLocs)
+          if (postLocs.some(l => l.locationId === targetId)) return true
+        } catch { /* retry on error too */ }
+        if (attempt === 0) await new Promise(r => setTimeout(r, 400))
+      }
+      return false
+    }
+
     const results: AssignResult[] = []
     const failedCodes: string[] = []
 
     for (const item of queue) {
-      try {
-        const postLocs = await getItemLocations(item.itemCode)
-        const postSet = new Set(postLocs.map(l => l.locationId))
-        if (postSet.has(targetId)) {
-          if (preLocs[item.itemCode]?.has(targetId)) {
-            results.push({ itemCode: item.itemCode, name: item.name, status: 'already' })
-          } else {
-            results.push({ itemCode: item.itemCode, name: item.name, status: 'new' })
-          }
+      const landed = await verifyAt(item.itemCode)
+      if (landed) {
+        if (preLocs[item.itemCode]?.has(targetId)) {
+          results.push({ itemCode: item.itemCode, name: item.name, status: 'already' })
         } else {
-          failedCodes.push(item.itemCode)
+          results.push({ itemCode: item.itemCode, name: item.name, status: 'new' })
         }
-      } catch {
+      } else {
         failedCodes.push(item.itemCode)
       }
       setProgress(prev => ({ ...prev, done: prev.done + 1 }))
     }
 
-    // Retry pass: individual assign for failed items
     for (const code of failedCodes) {
       const item = queue.find(q => q.itemCode === code)!
       try {
         await assignItemToLocation(targetId, code)
-        const postLocs = await getItemLocations(code)
-        if (postLocs.some(l => l.locationId === targetId)) {
-          results.push({ itemCode: code, name: item.name, status: 'new' })
-        } else {
-          results.push({ itemCode: code, name: item.name, status: 'failed' })
-        }
+        const landed = await verifyAt(code)
+        results.push({
+          itemCode: code, name: item.name,
+          status: landed ? 'new' : 'failed',
+        })
       } catch {
         results.push({ itemCode: code, name: item.name, status: 'failed' })
       }
@@ -253,6 +306,32 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
   const newCount = assignResults.filter(r => r.status === 'new').length
   const alreadyCount = assignResults.filter(r => r.status === 'already').length
   const failedCount = assignResults.filter(r => r.status === 'failed').length
+
+  // Render location summary line for a queue/result row
+  function renderLocLine(item: QueueItem) {
+    if (item.existingLocs === undefined) {
+      return <span className="text-[10px] text-gray-300">Checking location...</span>
+    }
+    if (item.existingLocs.length === 0) {
+      return <span className="text-[10px] text-gray-400 italic">Not yet assigned</span>
+    }
+    const atTarget = targetId != null && item.existingLocs.some(l => l.locationId === targetId)
+    const first = formatLocPath(item.existingLocs[0], flatLocs)
+    const more = item.existingLocs.length - 1
+    const title = item.existingLocs.map(l => formatLocPath(l, flatLocs)).join(' | ')
+    return (
+      <span className="text-[10px] flex items-center gap-1 min-w-0" title={title}>
+        <MapPin size={9} className="text-indigo-500 shrink-0" />
+        <span className="text-indigo-700 font-medium truncate">{first}</span>
+        {more > 0 && <span className="text-gray-400">+{more}</span>}
+        {atTarget && (
+          <span className="ml-1 px-1 py-[1px] rounded bg-amber-100 text-amber-700 text-[9px] font-semibold shrink-0">
+            Already at target
+          </span>
+        )}
+      </span>
+    )
+  }
 
   return (
     <>
@@ -286,88 +365,8 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
         {/* ═══════════════ BUILD STEP ═══════════════ */}
         {step === 'build' && (
           <div className="flex-1 overflow-y-auto">
-            {/* Search bar */}
-            <div className="px-4 pt-3 pb-2 space-y-2">
-              <form onSubmit={handleSearchSubmit} className="flex gap-2">
-                <div className="flex-1 relative">
-                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <input
-                    type="search"
-                    inputMode="search"
-                    value={query}
-                    onChange={e => setQuery(e.target.value)}
-                    placeholder="Scan, type barcode or ordercode..."
-                    className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                    autoFocus
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setScannerOpen(true)}
-                  className="px-3 bg-gray-100 rounded-lg hover:bg-gray-200 text-gray-600"
-                >
-                  <ScanBarcode size={18} />
-                </button>
-              </form>
-
-              {/* Search results */}
-              {loading && <p className="text-xs text-gray-400 text-center py-1 animate-pulse">Searching...</p>}
-              {results.length > 0 && (
-                <div className="max-h-[150px] overflow-y-auto border border-gray-100 rounded-lg">
-                  {results.map((item, i) => {
-                    const inQueue = queue.some(q => q.itemCode === item.itemCode)
-                    return (
-                      <button
-                        key={`${item.itemCode}-${i}`}
-                        onClick={() => addToQueue(item)}
-                        disabled={inQueue}
-                        className="w-full text-left px-3 py-2 flex items-center justify-between hover:bg-gray-50 border-b border-gray-50 last:border-0 disabled:opacity-50"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-xs font-medium text-gray-800 truncate">{item.name}</p>
-                          <p className="text-[10px] text-gray-400">{item.department} · #{item.itemCode}</p>
-                        </div>
-                        {inQueue ? (
-                          <Check size={14} className="text-emerald-600 shrink-0" />
-                        ) : (
-                          <ChevronRight size={14} className="text-gray-300 shrink-0" />
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Queued items */}
-            <div className="px-4 pb-2">
-              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
-                Items to assign ({queue.length})
-              </p>
-              {queue.length === 0 ? (
-                <div className="py-6 text-center">
-                  <Package size={24} className="text-gray-300 mx-auto mb-2" />
-                  <p className="text-xs text-gray-400">Scan or search items to add them</p>
-                </div>
-              ) : (
-                <div className="space-y-1 max-h-[150px] overflow-y-auto">
-                  {queue.map(item => (
-                    <div key={item.itemCode} className="flex items-center justify-between bg-gray-50 rounded-lg px-2.5 py-1.5">
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-gray-800 truncate">{item.name}</p>
-                        <p className="text-[10px] text-gray-400">#{item.itemCode}</p>
-                      </div>
-                      <button onClick={() => removeFromQueue(item.itemCode)} className="p-1 text-gray-400 hover:text-red-600 shrink-0">
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Location picker */}
-            <div className="px-4 pb-3 border-t border-gray-100 pt-3">
+            {/* 1. Target Location (cascade) */}
+            <div className="px-4 pt-3 pb-3 border-b border-gray-100">
               <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
                 Target Location
               </p>
@@ -399,8 +398,98 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
               )}
             </div>
 
-            {/* Assign button */}
-            <div className="px-4 pb-4 pt-2 border-t border-gray-100 shrink-0">
+            {/* 2. Sticky search + scan */}
+            <div className="sticky top-0 z-10 bg-white px-4 pt-3 pb-2 border-b border-gray-100 space-y-2">
+              <form onSubmit={handleSearchSubmit} className="flex gap-2">
+                <div className="flex-1 relative">
+                  <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input
+                    type="search"
+                    inputMode="search"
+                    value={query}
+                    onChange={e => setQuery(e.target.value)}
+                    placeholder="Scan, type barcode or ordercode..."
+                    className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    autoFocus
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setScannerOpen(true)}
+                  className="px-3 py-2 bg-indigo-600 text-white rounded-lg flex items-center gap-1 font-medium text-xs hover:bg-indigo-700"
+                >
+                  <ScanBarcode size={16} />
+                  <span>Scan</span>
+                </button>
+              </form>
+
+              {/* Live search results */}
+              {loading && <p className="text-xs text-gray-400 text-center py-1 animate-pulse">Searching...</p>}
+              {!loading && results.length > 0 && (
+                <div className="max-h-[240px] overflow-y-auto border border-indigo-100 bg-white rounded-lg shadow-sm">
+                  {results.map((item, i) => {
+                    const inQueue = queue.some(q => q.itemCode === item.itemCode)
+                    return (
+                      <button
+                        key={`${item.itemCode}-${i}`}
+                        type="button"
+                        onClick={() => addToQueue(item)}
+                        disabled={inQueue}
+                        className="w-full text-left px-3 py-2 flex items-center justify-between hover:bg-indigo-50/50 border-b border-gray-50 last:border-0 disabled:opacity-50"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-gray-800 truncate">{item.name}</p>
+                          <p className="text-[10px] text-gray-400 truncate">{item.department} · #{item.itemCode}</p>
+                          <div className="mt-0.5">{renderLocLine(item)}</div>
+                        </div>
+                        {inQueue ? (
+                          <Check size={14} className="text-emerald-600 shrink-0 ml-2" />
+                        ) : (
+                          <ChevronRight size={14} className="text-gray-300 shrink-0 ml-2" />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              {!loading && query.trim() && results.length === 0 && (
+                <p className="text-[11px] text-gray-400 text-center py-1">No items found</p>
+              )}
+            </div>
+
+            {/* 3. Queue */}
+            <div className="px-4 pt-3 pb-2">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1">
+                Items to assign ({queue.length})
+              </p>
+              {queue.length === 0 ? (
+                <div className="py-6 text-center">
+                  <Package size={24} className="text-gray-300 mx-auto mb-2" />
+                  <p className="text-xs text-gray-400">Scan or search items above to queue them</p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {queue.map(item => (
+                    <div key={item.itemCode} className="flex items-center justify-between bg-gray-50 rounded-lg px-2.5 py-1.5 gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-gray-800 truncate">{item.name}</p>
+                        <p className="text-[10px] text-gray-400">#{item.itemCode}</p>
+                        <div className="mt-0.5">{renderLocLine(item)}</div>
+                      </div>
+                      <button
+                        onClick={() => removeFromQueue(item.itemCode)}
+                        className="p-1 text-gray-400 hover:text-red-600 shrink-0"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 4. Assign button */}
+            <div className="px-4 pb-4 pt-2 border-t border-gray-100">
               <button
                 onClick={handleAssign}
                 disabled={queue.length === 0 || !targetId}

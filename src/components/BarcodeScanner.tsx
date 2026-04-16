@@ -83,9 +83,30 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     })
     scannerRef.current = scanner
 
-    scanner
+    // Pin the rear camera. `facingMode: 'environment'` is only a *preference* on
+    // some browsers (Chrome on certain Android builds, Safari in PWA mode), so
+    // devices with both front + back cameras can end up on the user-facing one.
+    // Enumerate first and pass a concrete deviceId to force the back camera.
+    //   - Match labels containing "back", "rear", or "environment".
+    //   - If permission hasn't been granted yet, labels can be blank. In that
+    //     case, fall back to the LAST enumerated camera — by convention, rear
+    //     cameras are listed after the user-facing one on mobile browsers.
+    //   - If enumeration itself fails, fall back to the original facingMode
+    //     constraint (strict `exact` → never silently uses the front cam).
+    const pickRearCamera = async (): Promise<string | { facingMode: { exact: 'environment' } }> => {
+      try {
+        const cameras = await Html5Qrcode.getCameras()
+        if (cameras.length === 0) return { facingMode: { exact: 'environment' } }
+        const labeled = cameras.find(c => /back|rear|environment/i.test(c.label))
+        return labeled?.id ?? cameras[cameras.length - 1].id
+      } catch {
+        return { facingMode: { exact: 'environment' } }
+      }
+    }
+
+    pickRearCamera().then(cameraSource => scanner
       .start(
-        { facingMode: 'environment' },
+        cameraSource,
         {
           fps: 20,
           // Wide, short box matches the 3.5:1 aspect of EAN-13 / UPC-A.
@@ -154,7 +175,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
       })
       .catch((err) => {
         setError(typeof err === 'string' ? err : (err as Error).message ?? 'Camera not available')
-      })
+      }))
 
     return () => {
       activeRef.current  = false

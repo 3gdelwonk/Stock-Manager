@@ -149,6 +149,29 @@ export function buildItemBreadcrumb(
   return result as Record<LevelKey, BreadcrumbCell>
 }
 
+// ── Compact single-line formatter for an item's assigned location ──────────
+// Example: "ZONE-A · AISLE 3 · BAY B1 · ROW 2"
+// Falls back to `loc.path`, then `loc.name`, then the raw id. Used in
+// bulk-location queue rows and result rows to surface existing allocations.
+
+export function formatLocPath(loc: ItemLocation, flat: FlatLocation[]): string {
+  const crumbs = buildItemBreadcrumb(loc, flat)
+  const parts: string[] = []
+  for (const tid of LEVEL_ORDER) {
+    const cell = crumbs[tid]
+    const label = cell.shortCode || cell.name
+    if (label) parts.push(label)
+  }
+  if (parts.length > 0) return parts.join(' · ')
+
+  const fallback = loc.path
+    ?? (loc as Record<string, unknown>).fullPath as string | undefined
+    ?? loc.name
+    ?? (loc as Record<string, unknown>).locationName as string | undefined
+  if (fallback) return fallback
+  return `#${loc.locationId ?? ''}`
+}
+
 // ── Parse hierarchy from a location ID ──────────────────────────────────────
 
 export function parseLocationHierarchy(
