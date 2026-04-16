@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, X, ScanBarcode, DollarSign, Printer, Tag, Clock, PackagePlus, FileText, MapPin } from 'lucide-react'
+import { Plus, X, ScanBarcode, DollarSign, Printer, Tag, Clock, PackagePlus, FileText, MapPin, Map } from 'lucide-react'
 
 interface FABMenuProps {
   onSmartScan: () => void
@@ -10,9 +10,11 @@ interface FABMenuProps {
   onPromotions: () => void
   onInvoiceDirect: () => void
   onBulkLocation: () => void
+  onManageLocations: () => void
 }
 
 const MENU_ITEMS = [
+  { key: 'manageLocations', label: 'Manage Locations', icon: Map,         color: 'text-teal-600',   bg: 'bg-teal-50' },
   { key: 'bulkLocation',   label: 'Bulk Location',   icon: MapPin,       color: 'text-indigo-600', bg: 'bg-indigo-50' },
   { key: 'invoiceDirect',  label: 'Invoice Directs', icon: FileText,     color: 'text-slate-600',  bg: 'bg-slate-50' },
   { key: 'addExpiry',      label: 'Add Expiry',      icon: Clock,        color: 'text-purple-600', bg: 'bg-purple-50' },
@@ -32,6 +34,7 @@ export default function FABMenu({
   onPromotions,
   onInvoiceDirect,
   onBulkLocation,
+  onManageLocations,
 }: FABMenuProps) {
   const [open, setOpen] = useState(false)
 
@@ -54,6 +57,7 @@ export default function FABMenu({
     promotions: onPromotions,
     invoiceDirect: onInvoiceDirect,
     bulkLocation: onBulkLocation,
+    manageLocations: onManageLocations,
   }
 
   function handleAction(key: string) {

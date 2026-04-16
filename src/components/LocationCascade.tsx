@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Settings2 } from 'lucide-react'
 import type { FlatLocation, LevelOption } from '../lib/locationUtils'
 import { TYPE_IDS, groupByPrefix } from '../lib/locationUtils'
 
@@ -165,6 +165,7 @@ interface LocationCascadeProps {
   onAisleChange: (id: number | '') => void
   onBayChange: (id: number | '') => void
   onRowChange: (id: number | '') => void
+  onManage?: () => void
 }
 
 function toOption(f: FlatLocation): LevelOption {
@@ -182,6 +183,7 @@ export default function LocationCascade({
   onAisleChange,
   onBayChange,
   onRowChange,
+  onManage,
 }: LocationCascadeProps) {
   const zones = useMemo(
     () => flatLocations.filter(l => l.typeId === TYPE_IDS.ZONE).sort((a, b) => a.id - b.id).map(toOption),
@@ -205,15 +207,35 @@ export default function LocationCascade({
 
   if (flatLocations.length === 0) {
     return (
-      <div className="flex items-center justify-center py-4">
-        <Loader2 size={16} className="text-gray-400 animate-spin" />
-        <span className="text-xs text-gray-400 ml-2">Loading locations...</span>
+      <div className="flex flex-col items-center justify-center py-4 gap-2">
+        <div className="flex items-center">
+          <Loader2 size={16} className="text-gray-400 animate-spin" />
+          <span className="text-xs text-gray-400 ml-2">Loading locations...</span>
+        </div>
+        {onManage && (
+          <button
+            onClick={onManage}
+            className="flex items-center gap-1 text-[10px] font-medium text-indigo-600 hover:text-indigo-700"
+          >
+            <Settings2 size={10} /> Manage Locations
+          </button>
+        )}
       </div>
     )
   }
 
   return (
     <div className="space-y-2.5">
+      {onManage && (
+        <div className="flex justify-end">
+          <button
+            onClick={onManage}
+            className="flex items-center gap-1 text-[10px] font-medium text-indigo-600 hover:text-indigo-700 px-1.5 py-0.5 rounded hover:bg-indigo-50"
+          >
+            <Settings2 size={10} /> Manage
+          </button>
+        </div>
+      )}
       <LocationLevelColumn label="Zone" options={zones} selectedId={zoneId} onSelectId={onZoneChange} busy={busy} />
 
       {zoneId !== '' && (

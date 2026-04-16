@@ -14,6 +14,7 @@ import { resolveBarcode, getAliasesForItem, setPrimaryBarcode } from '../lib/bar
 import { db, type BarcodeAlias } from '../lib/db'
 import { MapPin, Pencil, Check, Plus, Trash2 } from 'lucide-react'
 import LocationCascade, { useCascadeState } from './LocationCascade'
+import StoreLocationManager from './StoreLocationManager'
 import { flattenLocations, buildItemBreadcrumb, LEVEL_ORDER, TYPE_LABELS } from '../lib/locationUtils'
 import type { FlatLocation } from '../lib/locationUtils'
 import { useProductExpiry, type ExpiryInfo } from '../lib/useProductExpiry'
@@ -106,7 +107,12 @@ const StockCard = memo(function StockCard({
   const [locBusy, setLocBusy] = useState(false)
   const [locPickerOpen, setLocPickerOpen] = useState(false)
   const [editingLocId, setEditingLocId] = useState<number | null>(null)
+  const [managerOpen, setManagerOpen] = useState(false)
   const cascade = useCascadeState()
+
+  const refreshFlatLocs = () => {
+    getLocations().then(tree => setFlatLocs(flattenLocations(tree))).catch(() => {})
+  }
 
   function showActionMsg(msg: string) {
     setActionMsg(msg)
@@ -478,6 +484,7 @@ const StockCard = memo(function StockCard({
                   onAisleChange={cascade.setAisleId}
                   onBayChange={cascade.setBayId}
                   onRowChange={cascade.setRowId}
+                  onManage={() => setManagerOpen(true)}
                 />
                 <div className="flex gap-2">
                   <button
@@ -667,6 +674,12 @@ const StockCard = memo(function StockCard({
           </div>
         </div>
       )}
+
+      {/* Inline location manager — refresh tree on close */}
+      <StoreLocationManager
+        open={managerOpen}
+        onClose={() => { setManagerOpen(false); refreshFlatLocs() }}
+      />
     </div>
   )
 })

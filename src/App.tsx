@@ -21,6 +21,7 @@ import BulkPrintSheet from './components/BulkPrintSheet'
 import CreatePromoSheet from './components/CreatePromoSheet'
 import InvoiceDirectSheet from './components/InvoiceDirectSheet'
 import BulkLocationSheet from './components/BulkLocationSheet'
+import StoreLocationManager from './components/StoreLocationManager'
 import { pruneImageCache } from './lib/db'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
@@ -131,6 +132,7 @@ export default function App() {
   const [createPromoOpen, setCreatePromoOpen] = useState(false)
   const [invoiceDirectOpen, setInvoiceDirectOpen] = useState(false)
   const [bulkLocationOpen, setBulkLocationOpen] = useState(false)
+  const [manageLocationsOpen, setManageLocationsOpen] = useState(false)
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
@@ -200,6 +202,7 @@ export default function App() {
         onPromotions={() => setCreatePromoOpen(true)}
         onInvoiceDirect={() => setInvoiceDirectOpen(true)}
         onBulkLocation={() => setBulkLocationOpen(true)}
+        onManageLocations={() => setManageLocationsOpen(true)}
       />
 
       <SmartScanner
@@ -256,6 +259,11 @@ export default function App() {
       <BulkLocationSheet
         open={bulkLocationOpen}
         onClose={() => setBulkLocationOpen(false)}
+      />
+
+      <StoreLocationManager
+        open={manageLocationsOpen}
+        onClose={() => setManageLocationsOpen(false)}
       />
     </div>
   )

@@ -11,6 +11,7 @@ import { flattenLocations } from '../lib/locationUtils'
 import type { FlatLocation } from '../lib/locationUtils'
 import LocationCascade, { useCascadeState } from './LocationCascade'
 import BarcodeScanner from './BarcodeScanner'
+import StoreLocationManager from './StoreLocationManager'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,16 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
   // Location picker
   const [flatLocs, setFlatLocs] = useState<FlatLocation[]>([])
   const [locsLoading, setLocsLoading] = useState(false)
+  const [managerOpen, setManagerOpen] = useState(false)
   const cascade = useCascadeState()
+
+  const refreshLocations = () => {
+    setLocsLoading(true)
+    getLocations()
+      .then(tree => setFlatLocs(flattenLocations(tree)))
+      .catch(() => {})
+      .finally(() => setLocsLoading(false))
+  }
 
   // Assign step
   const [assignResults, setAssignResults] = useState<AssignResult[]>([])
@@ -76,11 +86,7 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
   // Load location tree on open
   useEffect(() => {
     if (!open) return
-    setLocsLoading(true)
-    getLocations()
-      .then(tree => setFlatLocs(flattenLocations(tree)))
-      .catch(() => {})
-      .finally(() => setLocsLoading(false))
+    refreshLocations()
   }, [open])
 
   // Reset on close
@@ -359,6 +365,7 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
                   onAisleChange={cascade.setAisleId}
                   onBayChange={cascade.setBayId}
                   onRowChange={cascade.setRowId}
+                  onManage={() => setManagerOpen(true)}
                 />
               )}
               {targetLoc && (
@@ -477,6 +484,12 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
           onClose={() => setScannerOpen(false)}
         />
       )}
+
+      {/* Inline location manager — refresh tree on close */}
+      <StoreLocationManager
+        open={managerOpen}
+        onClose={() => { setManagerOpen(false); refreshLocations() }}
+      />
 
       <style>{`
         @keyframes slide-up {
