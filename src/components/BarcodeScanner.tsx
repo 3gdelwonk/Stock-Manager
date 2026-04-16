@@ -83,25 +83,54 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     })
     scannerRef.current = scanner
 
-    // Pin the rear camera. `facingMode: 'environment'` is only a *preference* on
-    // some browsers (Chrome on certain Android builds, Safari in PWA mode), so
-    // devices with both front + back cameras can end up on the user-facing one.
-    // Enumerate first and pass a concrete deviceId to force the back camera.
-    //   - Match labels containing "back", "rear", or "environment".
-    //   - If permission hasn't been granted yet, labels can be blank. In that
-    //     case, fall back to the LAST enumerated camera — by convention, rear
-    //     cameras are listed after the user-facing one on mobile browsers.
-    //   - If enumeration itself fails, fall back to the original facingMode
-    //     constraint (strict `exact` → never silently uses the front cam).
-    const pickRearCamera = async (): Promise<string | { facingMode: { exact: 'environment' } }> => {
+    // Pin the rear camera. Several browsers treat `facingMode: 'environment'`
+    // (and even `{ exact: 'environment' }` passed through html5-qrcode's own
+    // camera handling) as a soft *preference* — so devices with front + back
+    // cameras can still end up on the user-facing one. We force the issue in
+    // three stages:
+    //
+    //   1. getUserMedia probe with `facingMode: { exact: 'environment' }`.
+    //      This forces the OS to hand us the back camera or throw
+    //      OverconstrainedError. We grab the deviceId via
+    //      track.getSettings() and stop the probe stream — html5-qrcode will
+    //      then open the same deviceId without going through its own
+    //      permission negotiation. This is the reliable path on modern
+    //      browsers (Chrome, Safari-iOS 15+, Samsung Internet, Edge).
+    //
+    //   2. If the probe rejects (device has no explicit back cam, or
+    //      getUserMedia is not available — older WebViews), enumerate via
+    //      Html5Qrcode.getCameras(). Prefer a label that matches
+    //      back/rear/environment/world, else the first camera whose label
+    //      does NOT look user-facing (front/user/selfie/face), else the
+    //      last enumerated camera as a last-ditch heuristic.
+    //
+    //   3. If enumeration itself fails, fall back to the strict facingMode
+    //      constraint so html5-qrcode at least fails loudly rather than
+    //      silently opening the front cam.
+    const pickRearCamera = async (): Promise<string | MediaTrackConstraints> => {
+      try {
+        const probe = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { exact: 'environment' } },
+        })
+        const track    = probe.getVideoTracks()[0]
+        const settings = track?.getSettings?.() as MediaTrackSettings | undefined
+        const deviceId = settings?.deviceId
+        probe.getTracks().forEach(t => t.stop())
+        if (deviceId) return deviceId
+      } catch { /* no exact back cam or no getUserMedia — enumerate */ }
+
       try {
         const cameras = await Html5Qrcode.getCameras()
-        if (cameras.length === 0) return { facingMode: { exact: 'environment' } }
-        const labeled = cameras.find(c => /back|rear|environment/i.test(c.label))
-        return labeled?.id ?? cameras[cameras.length - 1].id
-      } catch {
-        return { facingMode: { exact: 'environment' } }
-      }
+        if (cameras.length > 0) {
+          const labeled = cameras.find(c => /back|rear|environment|world/i.test(c.label))
+          if (labeled) return labeled.id
+          const notFront = cameras.find(c => c.label && !/front|user|selfie|face/i.test(c.label))
+          if (notFront) return notFront.id
+          return cameras[cameras.length - 1].id
+        }
+      } catch { /* fall through to facingMode */ }
+
+      return { facingMode: { exact: 'environment' } } as MediaTrackConstraints
     }
 
     pickRearCamera().then(cameraSource => scanner

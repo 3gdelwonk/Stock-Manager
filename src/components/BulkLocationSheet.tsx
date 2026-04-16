@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import {
   searchItemsSmart, barcodeVariants, searchItems,
-  getLocations, getItemLocations,
+  getLocations, getItemLocations, getLocationItems,
   bulkAssignItems, assignItemToLocation,
   type ItemLocation,
 } from '../lib/jarvis'
@@ -226,64 +226,63 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
     const allCodes = queue.map(q => q.itemCode)
     setProgress({ done: 0, total: allCodes.length })
 
-    const preLocs: Record<string, Set<number>> = {}
-    await Promise.all(allCodes.map(async code => {
+    // Verify via getLocationItems(targetId) — the items-AT-location endpoint.
+    // Earlier attempts used getItemLocations(itemCode) and compared numeric
+    // locationId fields, which silently broke when the backend returned the
+    // ID under a different key (locationID, location_id, id) or as a string.
+    // getLocationItems keys by itemCode (a string), sidestepping all of that.
+    const readAtTarget = async (): Promise<Set<string>> => {
       try {
-        const locs = await getItemLocations(code)
-        preLocs[code] = new Set(locs.map(l => l.locationId))
-      } catch {
-        preLocs[code] = new Set()
-      }
-    }))
+        const items = await getLocationItems(targetId)
+        return new Set(items.map(i => i.itemCode))
+      } catch { return new Set() }
+    }
+
+    const preAtTarget = await readAtTarget()
 
     try {
       await bulkAssignItems(targetId, allCodes)
-    } catch { /* continue to verify */ }
+    } catch { /* continue to verify — individual retry handles failures */ }
 
-    // Verify: re-fetch item locations. POS can lag a few hundred ms between
-    // committing the write and having it visible on the read path, so miss
-    // once → wait → re-read once before marking as failed. Without this, a
-    // successful DB write gets reported as "failed" in the UI.
-    const verifyAt = async (code: string): Promise<boolean> => {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const postLocs = await getItemLocations(code)
-          locCache.current.set(code, postLocs)
-          if (postLocs.some(l => l.locationId === targetId)) return true
-        } catch { /* retry on error too */ }
-        if (attempt === 0) await new Promise(r => setTimeout(r, 400))
-      }
-      return false
+    let postAtTarget = await readAtTarget()
+    const missing = allCodes.filter(c => !postAtTarget.has(c))
+    if (missing.length > 0) {
+      await new Promise(r => setTimeout(r, 500))
+      postAtTarget = await readAtTarget()
     }
 
     const results: AssignResult[] = []
     const failedCodes: string[] = []
 
     for (const item of queue) {
-      const landed = await verifyAt(item.itemCode)
-      if (landed) {
-        if (preLocs[item.itemCode]?.has(targetId)) {
-          results.push({ itemCode: item.itemCode, name: item.name, status: 'already' })
-        } else {
-          results.push({ itemCode: item.itemCode, name: item.name, status: 'new' })
-        }
+      // Refresh per-item location cache for the Done step's chip.
+      getItemLocations(item.itemCode).then(locs =>
+        locCache.current.set(item.itemCode, locs),
+      ).catch(() => {})
+
+      if (postAtTarget.has(item.itemCode)) {
+        results.push({
+          itemCode: item.itemCode, name: item.name,
+          status: preAtTarget.has(item.itemCode) ? 'already' : 'new',
+        })
       } else {
         failedCodes.push(item.itemCode)
       }
       setProgress(prev => ({ ...prev, done: prev.done + 1 }))
     }
 
-    for (const code of failedCodes) {
-      const item = queue.find(q => q.itemCode === code)!
-      try {
-        await assignItemToLocation(targetId, code)
-        const landed = await verifyAt(code)
+    if (failedCodes.length > 0) {
+      for (const code of failedCodes) {
+        try { await assignItemToLocation(targetId, code) } catch { /* keep going */ }
+      }
+      await new Promise(r => setTimeout(r, 300))
+      const finalAtTarget = await readAtTarget()
+      for (const code of failedCodes) {
+        const item = queue.find(q => q.itemCode === code)!
         results.push({
           itemCode: code, name: item.name,
-          status: landed ? 'new' : 'failed',
+          status: finalAtTarget.has(code) ? 'new' : 'failed',
         })
-      } catch {
-        results.push({ itemCode: code, name: item.name, status: 'failed' })
       }
     }
 
