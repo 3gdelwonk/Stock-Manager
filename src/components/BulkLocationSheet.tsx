@@ -306,6 +306,30 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
   const alreadyCount = assignResults.filter(r => r.status === 'already').length
   const failedCount = assignResults.filter(r => r.status === 'failed').length
 
+  // Compact status pill — at-a-glance assignment state. Rendered next to the
+  // item name in both result rows and queue rows so the user can tell, before
+  // committing to a queue/assign, whether the item already lives somewhere
+  // else in the store (or at the current target).
+  function renderStatusTag(item: QueueItem) {
+    const base = 'text-[9px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 whitespace-nowrap'
+    if (item.existingLocs === undefined) {
+      return <span className={`${base} bg-gray-100 text-gray-400`}>…</span>
+    }
+    const count = item.existingLocs.length
+    if (count === 0) {
+      return <span className={`${base} bg-gray-100 text-gray-500`}>Unassigned</span>
+    }
+    const atTarget = targetId != null && item.existingLocs.some(l => l.locationId === targetId)
+    if (atTarget) {
+      return <span className={`${base} bg-amber-100 text-amber-700`}>Already here</span>
+    }
+    return (
+      <span className={`${base} bg-emerald-100 text-emerald-700`}>
+        {count > 1 ? `${count} locations` : 'Assigned'}
+      </span>
+    )
+  }
+
   // Render location summary line for a queue/result row
   function renderLocLine(item: QueueItem) {
     if (item.existingLocs === undefined) {
@@ -314,7 +338,6 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
     if (item.existingLocs.length === 0) {
       return <span className="text-[10px] text-gray-400 italic">Not yet assigned</span>
     }
-    const atTarget = targetId != null && item.existingLocs.some(l => l.locationId === targetId)
     const first = formatLocPath(item.existingLocs[0], flatLocs)
     const more = item.existingLocs.length - 1
     const title = item.existingLocs.map(l => formatLocPath(l, flatLocs)).join(' | ')
@@ -323,11 +346,6 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
         <MapPin size={9} className="text-indigo-500 shrink-0" />
         <span className="text-indigo-700 font-medium truncate">{first}</span>
         {more > 0 && <span className="text-gray-400">+{more}</span>}
-        {atTarget && (
-          <span className="ml-1 px-1 py-[1px] rounded bg-amber-100 text-amber-700 text-[9px] font-semibold shrink-0">
-            Already at target
-          </span>
-        )}
       </span>
     )
   }
@@ -437,7 +455,10 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
                         className="w-full text-left px-3 py-2 flex items-center justify-between hover:bg-indigo-50/50 border-b border-gray-50 last:border-0 disabled:opacity-50"
                       >
                         <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-gray-800 truncate">{item.name}</p>
+                          <div className="flex items-center gap-1.5">
+                            <p className="text-xs font-medium text-gray-800 truncate flex-1">{item.name}</p>
+                            {renderStatusTag(item)}
+                          </div>
                           <p className="text-[10px] text-gray-400 truncate">{item.department} · #{item.itemCode}</p>
                           <div className="mt-0.5">{renderLocLine(item)}</div>
                         </div>
@@ -471,7 +492,10 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
                   {queue.map(item => (
                     <div key={item.itemCode} className="flex items-center justify-between bg-gray-50 rounded-lg px-2.5 py-1.5 gap-2">
                       <div className="min-w-0 flex-1">
-                        <p className="text-xs font-medium text-gray-800 truncate">{item.name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs font-medium text-gray-800 truncate flex-1">{item.name}</p>
+                          {renderStatusTag(item)}
+                        </div>
                         <p className="text-[10px] text-gray-400">#{item.itemCode}</p>
                         <div className="mt-0.5">{renderLocLine(item)}</div>
                       </div>
