@@ -20,6 +20,7 @@ import AddBatchSheet from './components/AddBatchSheet'
 import BulkPrintSheet from './components/BulkPrintSheet'
 import CreatePromoSheet from './components/CreatePromoSheet'
 import InvoiceDirectSheet from './components/InvoiceDirectSheet'
+import BulkLocationSheet from './components/BulkLocationSheet'
 import { pruneImageCache } from './lib/db'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
@@ -129,6 +130,7 @@ export default function App() {
   const [bulkPrintOpen, setBulkPrintOpen] = useState(false)
   const [createPromoOpen, setCreatePromoOpen] = useState(false)
   const [invoiceDirectOpen, setInvoiceDirectOpen] = useState(false)
+  const [bulkLocationOpen, setBulkLocationOpen] = useState(false)
 
   function handleTabChange(tab: Tab) {
     setActiveTab(tab)
@@ -197,6 +199,7 @@ export default function App() {
         onBulkPrint={() => setBulkPrintOpen(true)}
         onPromotions={() => setCreatePromoOpen(true)}
         onInvoiceDirect={() => setInvoiceDirectOpen(true)}
+        onBulkLocation={() => setBulkLocationOpen(true)}
       />
 
       <SmartScanner
@@ -248,6 +251,11 @@ export default function App() {
       <InvoiceDirectSheet
         open={invoiceDirectOpen}
         onClose={() => setInvoiceDirectOpen(false)}
+      />
+
+      <BulkLocationSheet
+        open={bulkLocationOpen}
+        onClose={() => setBulkLocationOpen(false)}
       />
     </div>
   )

@@ -6,12 +6,16 @@ import {
 } from 'lucide-react'
 import {
   checkConnection, getStockLevels, getPromotions, getTopSellers,
-  printLabel, getOrderInfo, getItemLocations,
+  printLabel, getOrderInfo, getItemLocations, getLocations,
+  assignItemToLocation, removeItemFromLocation,
   type StockItem, type LivePromotion, type TopSeller, type OrderInfo, type ItemLocation,
 } from '../lib/jarvis'
 import { resolveBarcode, getAliasesForItem, setPrimaryBarcode } from '../lib/barcodeResolver'
 import { db, type BarcodeAlias } from '../lib/db'
-import { MapPin, Pencil, Check } from 'lucide-react'
+import { MapPin, Pencil, Check, Plus, Trash2, ChevronRight } from 'lucide-react'
+import LocationCascade, { useCascadeState } from './LocationCascade'
+import { flattenLocations, buildItemBreadcrumb, LEVEL_ORDER, TYPE_LABELS, TYPE_IDS } from '../lib/locationUtils'
+import type { FlatLocation, BreadcrumbCell } from '../lib/locationUtils'
 import { useProductExpiry, type ExpiryInfo } from '../lib/useProductExpiry'
 import { prefetchImages, type PrefetchProgress } from '../lib/images'
 import { computeImagePriority } from '../lib/serper'
@@ -91,13 +95,18 @@ const StockCard = memo(function StockCard({
   const [aliases, setAliases] = useState<BarcodeAlias[]>([])
   const aliasesFetched = useRef(false)
 
-  // Location state (local DB)
+  // Location state
   const [locEdit, setLocEdit] = useState(false)
   const [loc, setLoc] = useState({ aisle: '', bay: '', shelf: '', section: '' })
   const locLoaded = useRef(false)
 
   // Server-side locations
   const [serverLocs, setServerLocs] = useState<ItemLocation[]>([])
+  const [flatLocs, setFlatLocs] = useState<FlatLocation[]>([])
+  const [locBusy, setLocBusy] = useState(false)
+  const [locPickerOpen, setLocPickerOpen] = useState(false)
+  const [editingLocId, setEditingLocId] = useState<number | null>(null)
+  const cascade = useCascadeState()
 
   function showActionMsg(msg: string) {
     setActionMsg(msg)
@@ -116,8 +125,9 @@ const StockCard = memo(function StockCard({
       db.products.where('barcode').equals(bc).first().then(p => {
         if (p) setLoc({ aisle: p.aisle || '', bay: p.bay || '', shelf: p.shelf || '', section: p.section || '' })
       })
-      // Fetch server-side locations
+      // Fetch server-side locations + location tree
       getItemLocations(stock.itemCode).then(setServerLocs).catch(() => {})
+      getLocations().then(tree => setFlatLocs(flattenLocations(tree))).catch(() => {})
     }
   }, [expanded, stock.barcode, stock.itemCode])
 
@@ -129,6 +139,45 @@ const StockCard = memo(function StockCard({
     }
     setLocEdit(false)
     showActionMsg('Location saved')
+  }
+
+  async function handleAssignLocation() {
+    const targetId = cascade.resolveTarget()
+    if (!targetId) return
+    setLocBusy(true)
+    try {
+      if (editingLocId) {
+        await removeItemFromLocation(editingLocId, stock.itemCode)
+      }
+      await assignItemToLocation(targetId, stock.itemCode)
+      const updated = await getItemLocations(stock.itemCode)
+      setServerLocs(updated)
+      cascade.reset()
+      setLocPickerOpen(false)
+      setEditingLocId(null)
+      showActionMsg(editingLocId ? 'Location changed' : 'Location assigned')
+    } catch (err) {
+      showActionMsg(`Failed: ${(err as Error).message}`)
+      if (editingLocId) {
+        getItemLocations(stock.itemCode).then(setServerLocs).catch(() => {})
+      }
+    } finally {
+      setLocBusy(false)
+    }
+  }
+
+  async function handleRemoveLocation(locId: number) {
+    setLocBusy(true)
+    try {
+      await removeItemFromLocation(locId, stock.itemCode)
+      const updated = await getItemLocations(stock.itemCode)
+      setServerLocs(updated)
+      showActionMsg('Location removed')
+    } catch (err) {
+      showActionMsg(`Remove failed: ${(err as Error).message}`)
+    } finally {
+      setLocBusy(false)
+    }
   }
 
   const lowStock = stock.onHand > 0 && stock.onHand <= stock.reorderLevel
@@ -352,47 +401,133 @@ const StockCard = memo(function StockCard({
           </div>
 
           {/* Location */}
-          <div className="bg-gray-50 rounded-lg px-3 py-2">
-            <div className="flex items-center justify-between mb-1">
+          <div className="bg-gray-50 rounded-lg px-3 py-2 space-y-2">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-1 text-[10px] font-semibold text-gray-500 uppercase">
-                <MapPin size={10} /> Location
+                <MapPin size={10} /> Store Locations
               </div>
-              {locEdit ? (
-                <button onClick={saveLoc} className="text-emerald-600 hover:text-emerald-700"><Check size={14} /></button>
-              ) : (
-                <button onClick={() => setLocEdit(true)} className="text-gray-400 hover:text-gray-600"><Pencil size={12} /></button>
-              )}
+              <button
+                onClick={() => { setLocPickerOpen(true); setEditingLocId(null); cascade.reset() }}
+                className="flex items-center gap-0.5 text-[10px] font-medium text-emerald-600 hover:text-emerald-700"
+              >
+                <Plus size={12} /> Add Location
+              </button>
             </div>
-            {/* Server-side store locations */}
-            {serverLocs.length > 0 && (
-              <div className="flex flex-wrap gap-1 mb-1.5">
-                {serverLocs.map((sl, i) => (
-                  <span key={i} className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[10px] font-medium">
-                    <MapPin size={8} />
-                    {sl.path || sl.name}
-                    <span className="text-indigo-400 font-mono">{sl.shortCode}</span>
-                  </span>
-                ))}
-              </div>
-            )}
-            {locEdit ? (
-              <div className="grid grid-cols-4 gap-1.5">
-                {(['aisle', 'bay', 'shelf', 'section'] as const).map(f => (
-                  <div key={f}>
-                    <label className="text-[9px] text-gray-400 capitalize">{f}</label>
-                    <input value={loc[f]} onChange={e => setLoc({ ...loc, [f]: e.target.value })}
-                      className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center focus:ring-1 focus:ring-emerald-400 outline-none" />
-                  </div>
-                ))}
+
+            {/* Current server-side assignments — breadcrumb grid */}
+            {serverLocs.length > 0 ? (
+              <div className="space-y-1.5">
+                {serverLocs.map((sl, i) => {
+                  const crumbs = buildItemBreadcrumb(sl, flatLocs)
+                  return (
+                    <div key={i} className="flex items-center gap-1.5">
+                      <div className="flex-1 grid grid-cols-4 gap-1 text-[10px]">
+                        {LEVEL_ORDER.map(tid => {
+                          const cell = crumbs[tid]
+                          return (
+                            <div key={tid} className="text-center">
+                              <span className="text-[8px] text-gray-400 block">{TYPE_LABELS[tid]}</span>
+                              <span className={`font-medium ${cell.shortCode ? 'text-gray-700' : 'text-gray-300'}`}>
+                                {cell.shortCode || cell.name || '—'}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEditingLocId(sl.locationId)
+                          cascade.reset()
+                          setLocPickerOpen(true)
+                        }}
+                        className="p-1 text-gray-400 hover:text-indigo-600"
+                        title="Change location"
+                      >
+                        <Pencil size={12} />
+                      </button>
+                      <button
+                        onClick={() => handleRemoveLocation(sl.locationId)}
+                        disabled={locBusy}
+                        className="p-1 text-gray-400 hover:text-red-600 disabled:opacity-50"
+                        title="Remove location"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             ) : (
-              <div className="grid grid-cols-4 gap-1.5 text-xs text-gray-600">
-                {(['aisle', 'bay', 'shelf', 'section'] as const).map(f => (
-                  <div key={f} className="text-center">
-                    <span className="text-[9px] text-gray-400 capitalize block">{f}</span>
-                    <span className="font-medium">{loc[f] || '—'}</span>
+              <p className="text-[10px] text-gray-400 text-center py-1">No store locations assigned</p>
+            )}
+
+            {/* Cascade picker (shown when adding/changing) */}
+            {locPickerOpen && (
+              <div className="border-t border-gray-200 pt-2 space-y-2">
+                <p className="text-[10px] font-medium text-gray-600">
+                  {editingLocId ? 'Change to:' : 'Assign to:'}
+                </p>
+                <LocationCascade
+                  flatLocations={flatLocs}
+                  busy={locBusy}
+                  zoneId={cascade.zoneId}
+                  aisleId={cascade.aisleId}
+                  bayId={cascade.bayId}
+                  rowId={cascade.rowId}
+                  onZoneChange={cascade.setZoneId}
+                  onAisleChange={cascade.setAisleId}
+                  onBayChange={cascade.setBayId}
+                  onRowChange={cascade.setRowId}
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAssignLocation}
+                    disabled={!cascade.hasInput || locBusy}
+                    className="flex-1 bg-emerald-600 text-white text-xs font-medium py-1.5 rounded-lg disabled:opacity-50"
+                  >
+                    {locBusy ? 'Saving...' : editingLocId ? 'Change' : 'Assign'}
+                  </button>
+                  <button
+                    onClick={() => { setLocPickerOpen(false); setEditingLocId(null); cascade.reset() }}
+                    className="px-3 bg-gray-200 text-gray-700 text-xs font-medium py-1.5 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Local DB location (legacy fields) */}
+            {(loc.aisle || loc.bay || loc.shelf || loc.section) && (
+              <div className="border-t border-gray-200 pt-1.5">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-[9px] text-gray-400">Local notes</span>
+                  {locEdit ? (
+                    <button onClick={saveLoc} className="text-emerald-600 hover:text-emerald-700"><Check size={12} /></button>
+                  ) : (
+                    <button onClick={() => setLocEdit(true)} className="text-gray-400 hover:text-gray-600"><Pencil size={10} /></button>
+                  )}
+                </div>
+                {locEdit ? (
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(['aisle', 'bay', 'shelf', 'section'] as const).map(f => (
+                      <div key={f}>
+                        <label className="text-[9px] text-gray-400 capitalize">{f}</label>
+                        <input value={loc[f]} onChange={e => setLoc({ ...loc, [f]: e.target.value })}
+                          className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs text-center focus:ring-1 focus:ring-emerald-400 outline-none" />
+                      </div>
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <div className="grid grid-cols-4 gap-1.5 text-xs text-gray-600">
+                    {(['aisle', 'bay', 'shelf', 'section'] as const).map(f => (
+                      <div key={f} className="text-center">
+                        <span className="text-[9px] text-gray-400 capitalize block">{f}</span>
+                        <span className="font-medium">{loc[f] || '—'}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
