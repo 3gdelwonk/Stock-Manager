@@ -569,15 +569,15 @@ export default function StoreLocationManager({ open, onClose }: Props) {
                 {renderLevel(TYPE_IDS.ZONE, zones, null, null, false)}
 
                 {cascade.zoneId !== '' && renderLevel(
-                  TYPE_IDS.AISLE, aisles, zoneLoc?.name ?? null, cascade.zoneId === '' ? null : cascade.zoneId, false,
+                  TYPE_IDS.AISLE, aisles, zoneLoc?.name ?? null, cascade.zoneId, false,
                 )}
 
                 {cascade.aisleId !== '' && renderLevel(
-                  TYPE_IDS.BAY, bays, aisleLoc?.name ?? null, cascade.aisleId === '' ? null : cascade.aisleId, true,
+                  TYPE_IDS.BAY, bays, aisleLoc?.name ?? null, cascade.aisleId, true,
                 )}
 
                 {cascade.bayId !== '' && renderLevel(
-                  TYPE_IDS.ROW, rowItems, bayLoc?.name ?? null, cascade.bayId === '' ? null : cascade.bayId, false,
+                  TYPE_IDS.ROW, rowItems, bayLoc?.name ?? null, cascade.bayId, false,
                 )}
               </div>
 
