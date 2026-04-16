@@ -149,7 +149,6 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
     if (!targetId || queue.length === 0) return
 
     setStep('assign')
-    setAssigning(true)
     const allCodes = queue.map(q => q.itemCode)
     setProgress({ done: 0, total: allCodes.length })
 
@@ -209,7 +208,6 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
     }
 
     setAssignResults(results)
-    setAssigning(false)
     setStep('done')
   }
 
