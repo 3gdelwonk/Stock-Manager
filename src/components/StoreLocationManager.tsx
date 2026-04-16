@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
-  X, Plus, ChevronRight, ChevronDown, MapPin, Trash2, Pencil, Check, Loader2,
-  Building2, LayoutGrid, Columns3, Rows3, Package, Search, AlertCircle,
+  X, Plus, MapPin, Trash2, Pencil, Check, Loader2, ChevronRight,
+  Package, Search, AlertCircle,
 } from 'lucide-react'
 import {
   getLocationTypes, getLocations, createLocation, updateLocation, deleteLocation,
@@ -10,6 +10,8 @@ import {
   searchItems,
   type LocationType, type StoreLocation, type LocationItem,
 } from '../lib/jarvis'
+import { TYPE_IDS, TYPE_LABELS, groupByPrefix } from '../lib/locationUtils'
+import { useCascadeState } from './LocationCascade'
 
 // Resolve any user-entered code (barcode or itemCode) to a confirmed itemCode
 // using the same JARVISmart search endpoint as the product search bar.
@@ -62,76 +64,104 @@ interface Props {
   onClose: () => void
 }
 
-const TYPE_ICONS: Record<number, typeof Building2> = {
-  4: Building2,  // Zone
-  1: Columns3,   // Aisle
-  2: LayoutGrid, // Bay
-  3: Rows3,      // Row
+// Colour scheme per level — indigo (Zone) → emerald (Aisle) → amber (Bay) → rose (Row)
+const LEVEL_COLORS: Record<number, { chipBg: string; chipText: string; chipBorder: string; chipSelected: string; accent: string; pillBg: string }> = {
+  [TYPE_IDS.ZONE]:  { chipBg: 'bg-indigo-50',  chipText: 'text-indigo-700',  chipBorder: 'border-indigo-100',  chipSelected: 'bg-indigo-600 text-white border-indigo-600 shadow-sm',  accent: 'text-indigo-600',  pillBg: 'bg-indigo-50' },
+  [TYPE_IDS.AISLE]: { chipBg: 'bg-emerald-50', chipText: 'text-emerald-700', chipBorder: 'border-emerald-100', chipSelected: 'bg-emerald-600 text-white border-emerald-600 shadow-sm', accent: 'text-emerald-600', pillBg: 'bg-emerald-50' },
+  [TYPE_IDS.BAY]:   { chipBg: 'bg-amber-50',   chipText: 'text-amber-700',   chipBorder: 'border-amber-100',   chipSelected: 'bg-amber-600 text-white border-amber-600 shadow-sm',   accent: 'text-amber-600',   pillBg: 'bg-amber-50' },
+  [TYPE_IDS.ROW]:   { chipBg: 'bg-rose-50',    chipText: 'text-rose-700',    chipBorder: 'border-rose-100',    chipSelected: 'bg-rose-600 text-white border-rose-600 shadow-sm',    accent: 'text-rose-600',    pillBg: 'bg-rose-50' },
 }
 
-const TYPE_COLORS: Record<number, { text: string; bg: string; border: string }> = {
-  4: { text: 'text-indigo-700', bg: 'bg-indigo-50', border: 'border-indigo-200' },
-  1: { text: 'text-emerald-700', bg: 'bg-emerald-50', border: 'border-emerald-200' },
-  2: { text: 'text-amber-700', bg: 'bg-amber-50', border: 'border-amber-200' },
-  3: { text: 'text-rose-700', bg: 'bg-rose-50', border: 'border-rose-200' },
-}
+const DEFAULT_COLORS = { chipBg: 'bg-gray-50', chipText: 'text-gray-700', chipBorder: 'border-gray-200', chipSelected: 'bg-gray-600 text-white border-gray-600', accent: 'text-gray-600', pillBg: 'bg-gray-50' }
 
-const DEFAULT_COLORS = { text: 'text-gray-700', bg: 'bg-gray-50', border: 'border-gray-200' }
-
-// Build a tree from flat list
-function buildTree(locations: StoreLocation[]): StoreLocation[] {
-  const map = new Map<number, StoreLocation>()
-  const roots: StoreLocation[] = []
-  for (const loc of locations) {
-    map.set(loc.id, { ...loc, children: [] })
-  }
-  for (const loc of locations) {
-    const node = map.get(loc.id)!
-    if (loc.parentId && map.has(loc.parentId)) {
-      map.get(loc.parentId)!.children!.push(node)
-    } else {
-      roots.push(node)
-    }
-  }
-  return roots
+function parentTypeId(typeId: number): number | null {
+  if (typeId === TYPE_IDS.AISLE) return TYPE_IDS.ZONE
+  if (typeId === TYPE_IDS.BAY) return TYPE_IDS.AISLE
+  if (typeId === TYPE_IDS.ROW) return TYPE_IDS.BAY
+  return null
 }
 
 export default function StoreLocationManager({ open, onClose }: Props) {
   const [types, setTypes] = useState<LocationType[]>([])
   const [locations, setLocations] = useState<StoreLocation[]>([])
-  const [tree, setTree] = useState<StoreLocation[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Expanded nodes
-  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  // Cascade state (reused from LocationCascade)
+  const cascade = useCascadeState()
 
-  // Selected node for detail panel
-  const [selected, setSelected] = useState<StoreLocation | null>(null)
-  const [selectedItems, setSelectedItems] = useState<LocationItem[]>([])
-  const [itemsLoading, setItemsLoading] = useState(false)
-
-  // Create / edit form
+  // Create / edit form state
   const [showCreate, setShowCreate] = useState(false)
-  const [createParentId, setCreateParentId] = useState<number | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
+  const [createTypeId, setCreateTypeId] = useState<number | null>(null)
+  const [createParentId, setCreateParentId] = useState<number | null>(null)
   const [formName, setFormName] = useState('')
   const [formShortCode, setFormShortCode] = useState('')
-  const [formTypeId, setFormTypeId] = useState<number>(4)
   const [saving, setSaving] = useState(false)
 
-  // Assign items
+  // Items panel state
+  const [selectedItems, setSelectedItems] = useState<LocationItem[]>([])
+  const [itemsLoading, setItemsLoading] = useState(false)
   const [assignMode, setAssignMode] = useState<'item' | 'bulk' | 'dept' | 'move' | null>(null)
   const [assignQuery, setAssignQuery] = useState('')
   const [assigning, setAssigning] = useState(false)
   const [assignResult, setAssignResult] = useState<string | null>(null)
+
+  // Flatten tree to flat list (works whether getLocations returns nested or flat)
+  const flatList = useMemo<StoreLocation[]>(() => {
+    const out: StoreLocation[] = []
+    const walk = (items: StoreLocation[]) => {
+      for (const l of items) {
+        out.push(l)
+        if (l.children?.length) walk(l.children)
+      }
+    }
+    walk(locations)
+    return out
+  }, [locations])
+
+  // Level collections, filtered by the picked parent
+  const zones = useMemo(
+    () => flatList.filter(l => l.typeId === TYPE_IDS.ZONE && l.active !== false).sort((a, b) => a.id - b.id),
+    [flatList],
+  )
+  const aisles = useMemo(
+    () => cascade.zoneId === ''
+      ? []
+      : flatList.filter(l => l.typeId === TYPE_IDS.AISLE && l.parentId === cascade.zoneId && l.active !== false).sort((a, b) => a.id - b.id),
+    [flatList, cascade.zoneId],
+  )
+  const bays = useMemo(
+    () => cascade.aisleId === ''
+      ? []
+      : flatList.filter(l => l.typeId === TYPE_IDS.BAY && l.parentId === cascade.aisleId && l.active !== false).sort((a, b) => a.id - b.id),
+    [flatList, cascade.aisleId],
+  )
+  const rowItems = useMemo(
+    () => cascade.bayId === ''
+      ? []
+      : flatList.filter(l => l.typeId === TYPE_IDS.ROW && l.parentId === cascade.bayId && l.active !== false).sort((a, b) => a.id - b.id),
+    [flatList, cascade.bayId],
+  )
+
+  // Currently focused node (deepest picked level)
+  const selected = useMemo<StoreLocation | null>(() => {
+    const id = cascade.resolveTarget()
+    if (id == null) return null
+    return flatList.find(l => l.id === id) ?? null
+  }, [flatList, cascade])
+
+  // Breadcrumb cells for the strip
+  const zoneLoc  = useMemo(() => flatList.find(l => l.id === cascade.zoneId)  ?? null, [flatList, cascade.zoneId])
+  const aisleLoc = useMemo(() => flatList.find(l => l.id === cascade.aisleId) ?? null, [flatList, cascade.aisleId])
+  const bayLoc   = useMemo(() => flatList.find(l => l.id === cascade.bayId)   ?? null, [flatList, cascade.bayId])
+  const rowLoc   = useMemo(() => flatList.find(l => l.id === cascade.rowId)   ?? null, [flatList, cascade.rowId])
 
   const refresh = useCallback(async () => {
     try {
       const [t, l] = await Promise.all([getLocationTypes(), getLocations()])
       setTypes(t)
       setLocations(l)
-      setTree(buildTree(l))
     } catch (e) {
       setError((e as Error).message)
     }
@@ -146,84 +176,107 @@ export default function StoreLocationManager({ open, onClose }: Props) {
     }
   }, [open, refresh])
 
-  function toggleExpand(id: number) {
-    setExpanded(prev => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  async function handleSelect(loc: StoreLocation) {
-    setSelected(loc)
-    setAssignMode(null)
+  // When focused target changes, load its items
+  const selectedId = selected?.id ?? null
+  useEffect(() => {
+    if (selectedId == null) { setSelectedItems([]); setAssignMode(null); return }
     setItemsLoading(true)
-    try {
-      const items = await getLocationItems(loc.id)
-      setSelectedItems(items)
-    } catch {
-      setSelectedItems([])
-    }
-    setItemsLoading(false)
+    getLocationItems(selectedId)
+      .then(setSelectedItems)
+      .catch(() => setSelectedItems([]))
+      .finally(() => setItemsLoading(false))
+  }, [selectedId])
+
+  // ── Cascade helpers ────────────────────────────────────────────────────
+  function setIdForType(typeId: number, id: number | '') {
+    if (typeId === TYPE_IDS.ZONE) cascade.setZoneId(id)
+    else if (typeId === TYPE_IDS.AISLE) cascade.setAisleId(id)
+    else if (typeId === TYPE_IDS.BAY) cascade.setBayId(id)
+    else if (typeId === TYPE_IDS.ROW) cascade.setRowId(id)
+  }
+  function getIdForType(typeId: number): number | '' {
+    if (typeId === TYPE_IDS.ZONE) return cascade.zoneId
+    if (typeId === TYPE_IDS.AISLE) return cascade.aisleId
+    if (typeId === TYPE_IDS.BAY) return cascade.bayId
+    if (typeId === TYPE_IDS.ROW) return cascade.rowId
+    return ''
   }
 
   // ── Create / Edit ──────────────────────────────────────────────────────
-  function openCreate(parentId: number | null) {
+  function openCreate(typeId: number, parentId: number | null) {
     setShowCreate(true)
     setEditingId(null)
+    setCreateTypeId(typeId)
     setCreateParentId(parentId)
     setFormName('')
     setFormShortCode('')
-    // Suggest type based on parent depth
-    if (parentId) {
-      const parent = locations.find(l => l.id === parentId)
-      if (parent) {
-        // Zone → Aisle, Aisle → Bay, Bay → Row
-        const childType: Record<number, number> = { 4: 1, 1: 2, 2: 3 }
-        setFormTypeId(childType[parent.typeId] || 3)
-      }
-    } else {
-      setFormTypeId(4) // Zone by default for root
-    }
   }
 
   function openEdit(loc: StoreLocation) {
     setShowCreate(true)
     setEditingId(loc.id)
+    setCreateTypeId(loc.typeId)
     setCreateParentId(loc.parentId ?? null)
     setFormName(loc.name)
     setFormShortCode(loc.shortCode)
-    setFormTypeId(loc.typeId)
+  }
+
+  function closeForm() {
+    setShowCreate(false)
+    setEditingId(null)
+    setCreateTypeId(null)
+    setCreateParentId(null)
+    setFormName('')
+    setFormShortCode('')
   }
 
   async function handleSaveLocation() {
-    if (!formName.trim() || !formShortCode.trim()) return
+    const name = formName.trim()
+    const shortCode = formShortCode.trim()
+    if (!name || !shortCode) return
+    if (!editingId && createTypeId == null) return
     setSaving(true)
     try {
       if (editingId) {
-        await updateLocation(editingId, { name: formName.trim(), shortCode: formShortCode.trim(), typeId: formTypeId })
+        await updateLocation(editingId, { name, shortCode })
+        setLocations(prev => prev.map(l => l.id === editingId ? { ...l, name, shortCode } : l))
       } else {
-        await createLocation({
-          name: formName.trim(),
-          shortCode: formShortCode.trim(),
-          typeId: formTypeId,
+        const newTypeId = createTypeId as number
+        const created = await createLocation({
+          name,
+          shortCode,
+          typeId: newTypeId,
           parentId: createParentId,
         })
+        // Optimistic local merge — server GET can be stale right after POST
+        setLocations(prev => {
+          if (prev.some(l => l.id === created.id)) return prev
+          return [...prev, { ...created, typeId: newTypeId, parentId: createParentId }]
+        })
+        // Auto-select the new node so its child row opens
+        setIdForType(newTypeId, created.id)
       }
-      setShowCreate(false)
-      await refresh()
+      closeForm()
+      // Background reconcile
+      refresh()
     } catch (e) {
       setError((e as Error).message)
     }
     setSaving(false)
   }
 
-  async function handleDelete(id: number) {
+  async function handleDelete(loc: StoreLocation) {
+    const childCount = flatList.filter(l => l.parentId === loc.id).length
+    const prompt = childCount > 0
+      ? `Delete "${loc.name}" and its ${childCount} child location${childCount !== 1 ? 's' : ''}?`
+      : `Delete "${loc.name}"?`
+    if (!window.confirm(prompt)) return
     try {
-      await deleteLocation(id)
-      if (selected?.id === id) { setSelected(null); setSelectedItems([]) }
-      await refresh()
+      await deleteLocation(loc.id)
+      setLocations(prev => prev.filter(l => l.id !== loc.id))
+      // Clear this level in cascade — useCascadeState auto-clears descendants
+      setIdForType(loc.typeId, '')
+      refresh()
     } catch (e) {
       setError((e as Error).message)
     }
@@ -318,59 +371,150 @@ export default function StoreLocationManager({ open, onClose }: Props) {
     }
   }
 
-  // ── Tree node renderer ─────────────────────────────────────────────────
-  function renderNode(node: StoreLocation, depth: number) {
-    const isExpanded = expanded.has(node.id)
-    const hasChildren = node.children && node.children.length > 0
-    const isSelected = selected?.id === node.id
-    const colors = TYPE_COLORS[node.typeId] || DEFAULT_COLORS
-    const Icon = TYPE_ICONS[node.typeId] || MapPin
+  if (!open) return null
+
+  const typeMap = new Map(types.map(t => [t.id, t.name]))
+
+  // ── Chip renderer (shared across levels) ────────────────────────────────
+  function renderChip(loc: StoreLocation) {
+    const typeId = loc.typeId
+    const colors = LEVEL_COLORS[typeId] || DEFAULT_COLORS
+    const isSelected = getIdForType(typeId) === loc.id
+    return (
+      <button
+        key={loc.id}
+        onClick={() => setIdForType(typeId, isSelected ? '' : loc.id)}
+        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-all whitespace-nowrap ${
+          isSelected
+            ? colors.chipSelected
+            : `${colors.chipBg} ${colors.chipText} ${colors.chipBorder} hover:brightness-95 active:scale-95`
+        }`}
+      >
+        <span className="font-mono">{loc.shortCode}</span>
+        <span className={`font-normal ${isSelected ? 'text-white/80' : 'text-gray-500'}`}>{loc.name}</span>
+      </button>
+    )
+  }
+
+  // ── Level row renderer ──────────────────────────────────────────────────
+  function renderLevel(
+    typeId: number,
+    items: StoreLocation[],
+    parentName: string | null,
+    parentId: number | null,
+    grouped = false,
+  ) {
+    const label = TYPE_LABELS[typeId]
+    const parentLabelId = parentTypeId(typeId)
+    const parentLabel = parentLabelId != null ? TYPE_LABELS[parentLabelId].toLowerCase() : null
+    const colors = LEVEL_COLORS[typeId] || DEFAULT_COLORS
 
     return (
-      <div key={node.id}>
-        <div
-          className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
-            isSelected ? `${colors.bg} ${colors.border} border` : 'hover:bg-gray-50'
-          }`}
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
-        >
-          {/* Expand toggle */}
+      <div key={`level-${typeId}`} className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+            <span className={colors.accent}>{label}</span>
+            {parentName && <span className="text-gray-400 normal-case font-medium"> · in {parentName}</span>}
+          </p>
           <button
-            onClick={() => hasChildren && toggleExpand(node.id)}
-            className={`w-5 h-5 flex items-center justify-center shrink-0 ${hasChildren ? 'text-gray-400' : 'text-transparent'}`}
+            onClick={() => openCreate(typeId, parentId)}
+            className={`flex items-center gap-0.5 px-2 py-0.5 text-[10px] font-semibold ${colors.accent} hover:bg-gray-50 rounded`}
           >
-            {hasChildren && (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
-          </button>
-
-          {/* Node content */}
-          <button
-            onClick={() => handleSelect(node)}
-            className="flex-1 flex items-center gap-2 min-w-0 text-left"
-          >
-            <Icon size={14} className={colors.text} />
-            <span className={`text-sm font-medium truncate ${colors.text}`}>{node.name}</span>
-            <span className="text-[10px] text-gray-400 font-mono shrink-0">{node.shortCode}</span>
-          </button>
-
-          {/* Actions */}
-          <button
-            onClick={() => openCreate(node.id)}
-            className="p-1 text-gray-300 hover:text-emerald-600 shrink-0"
-            title="Add child"
-          >
-            <Plus size={12} />
+            <Plus size={11} /> New {label}{parentName ? ` in ${parentName}` : ''}
           </button>
         </div>
 
-        {/* Children */}
-        {isExpanded && hasChildren && node.children!.map(child => renderNode(child, depth + 1))}
+        {items.length === 0 ? (
+          <p className="text-[11px] text-gray-400 italic pl-0.5">
+            {parentLabel
+              ? `No ${label.toLowerCase()}s in this ${parentLabel} yet.`
+              : `No ${label.toLowerCase()}s yet.`}
+          </p>
+        ) : grouped ? (
+          <div className="space-y-1.5">
+            {Array.from(groupByPrefix(items).entries()).map(([prefix, list], gi) => (
+              <div key={prefix}>
+                {gi > 0 && <div className="border-t border-gray-100 my-1" />}
+                <p className="text-[9px] font-bold text-gray-400 uppercase mb-0.5">{prefix}</p>
+                <div className="flex flex-wrap gap-1.5">{list.map(renderChip)}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">{items.map(renderChip)}</div>
+        )}
+
+        {/* Inline create / edit form, anchored to this level */}
+        {showCreate && createTypeId === typeId && (
+          <div className={`mt-2 p-3 rounded-xl border border-gray-200 ${colors.pillBg} space-y-2.5`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${colors.chipSelected}`}>
+                  {label}
+                </span>
+                <p className="text-xs font-semibold text-gray-700 truncate">
+                  {editingId ? 'Edit' : 'New'} {label}
+                  {!editingId && parentName && (
+                    <span className="text-gray-400 font-normal"> in {parentName}</span>
+                  )}
+                </p>
+              </div>
+              <button onClick={closeForm} className="text-gray-400 hover:text-gray-600 shrink-0">
+                <X size={14} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-gray-500">Name</label>
+                <input
+                  value={formName}
+                  onChange={e => setFormName(e.target.value)}
+                  placeholder={`e.g. ${label === 'Zone' ? 'Grocery' : label === 'Aisle' ? 'Aisle 3' : label === 'Bay' ? 'Bay B2' : 'Row 1'}`}
+                  className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:ring-1 focus:ring-indigo-400 outline-none"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-500">Short Code</label>
+                <input
+                  value={formShortCode}
+                  onChange={e => setFormShortCode(e.target.value)}
+                  placeholder={`e.g. ${label === 'Zone' ? 'GRO' : label === 'Aisle' ? 'A3' : label === 'Bay' ? 'B2' : 'R1'}`}
+                  className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:ring-1 focus:ring-indigo-400 outline-none"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={handleSaveLocation}
+              disabled={saving || !formName.trim() || !formShortCode.trim()}
+              className="w-full py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 hover:bg-indigo-700"
+            >
+              {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
+            </button>
+          </div>
+        )}
       </div>
     )
   }
 
-  if (!open) return null
-
-  const typeMap = new Map(types.map(t => [t.id, t.name]))
+  // ── Breadcrumb segment renderer ─────────────────────────────────────────
+  function renderCrumb(typeId: number, loc: StoreLocation | null, onClick: () => void) {
+    const colors = LEVEL_COLORS[typeId] || DEFAULT_COLORS
+    if (!loc) {
+      return <span className="text-[11px] text-gray-300 font-medium">{TYPE_LABELS[typeId]}</span>
+    }
+    return (
+      <button
+        onClick={onClick}
+        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-semibold ${colors.accent} hover:bg-gray-50`}
+      >
+        <span className="font-mono">{loc.shortCode}</span>
+        <span className="text-gray-500 font-normal">{loc.name}</span>
+      </button>
+    )
+  }
 
   return (
     <>
@@ -401,107 +545,66 @@ export default function StoreLocationManager({ open, onClose }: Props) {
             </div>
           ) : (
             <div className="flex flex-col">
-              {/* ── Location Tree ── */}
-              <div className="px-3 py-3 space-y-0.5">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-gray-500 uppercase">Hierarchy</p>
+              {/* ── Breadcrumb strip ── */}
+              {(zoneLoc || aisleLoc || bayLoc || rowLoc) && (
+                <div className="flex items-center gap-1 flex-wrap px-4 pt-3 pb-2 border-b border-gray-100">
+                  {renderCrumb(TYPE_IDS.ZONE, zoneLoc, () => cascade.setZoneId(cascade.zoneId))}
+                  <ChevronRight size={11} className="text-gray-300" />
+                  {renderCrumb(TYPE_IDS.AISLE, aisleLoc, () => cascade.setAisleId(cascade.aisleId))}
+                  <ChevronRight size={11} className="text-gray-300" />
+                  {renderCrumb(TYPE_IDS.BAY, bayLoc, () => cascade.setBayId(cascade.bayId))}
+                  <ChevronRight size={11} className="text-gray-300" />
+                  {renderCrumb(TYPE_IDS.ROW, rowLoc, () => { /* deepest — nothing to narrow */ })}
                   <button
-                    onClick={() => openCreate(null)}
-                    className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100"
+                    onClick={cascade.reset}
+                    className="ml-auto text-[10px] font-medium text-gray-400 hover:text-gray-600"
                   >
-                    <Plus size={12} /> Add Zone
-                  </button>
-                </div>
-
-                {tree.length === 0 && (
-                  <p className="text-xs text-gray-400 text-center py-6">No locations yet. Create a Zone to get started.</p>
-                )}
-
-                {tree.map(node => renderNode(node, 0))}
-              </div>
-
-              {/* ── Create / Edit Form ── */}
-              {showCreate && (
-                <div className="mx-3 mb-3 p-3 bg-gray-50 rounded-xl border border-gray-200 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-semibold text-gray-700">
-                      {editingId ? 'Edit Location' : 'New Location'}
-                      {createParentId && !editingId && (
-                        <span className="text-gray-400 font-normal"> in {locations.find(l => l.id === createParentId)?.name}</span>
-                      )}
-                    </p>
-                    <button onClick={() => setShowCreate(false)} className="text-gray-400 hover:text-gray-600"><X size={14} /></button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-gray-500">Name</label>
-                      <input
-                        value={formName}
-                        onChange={e => setFormName(e.target.value)}
-                        placeholder="e.g. Grocery"
-                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm focus:ring-1 focus:ring-indigo-400 outline-none"
-                        autoFocus
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-gray-500">Short Code</label>
-                      <input
-                        value={formShortCode}
-                        onChange={e => setFormShortCode(e.target.value)}
-                        placeholder="e.g. GRO"
-                        className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm font-mono focus:ring-1 focus:ring-indigo-400 outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-gray-500">Type</label>
-                    <div className="flex gap-1.5 mt-1">
-                      {types.map(t => {
-                        const c = TYPE_COLORS[t.id] || DEFAULT_COLORS
-                        return (
-                          <button
-                            key={t.id}
-                            onClick={() => setFormTypeId(t.id)}
-                            className={`flex-1 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                              formTypeId === t.id
-                                ? `${c.bg} ${c.text} ${c.border}`
-                                : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50'
-                            }`}
-                          >
-                            {t.name}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={handleSaveLocation}
-                    disabled={saving || !formName.trim() || !formShortCode.trim()}
-                    className="w-full py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg disabled:opacity-50 hover:bg-indigo-700"
-                  >
-                    {saving ? 'Saving...' : editingId ? 'Update' : 'Create'}
+                    Clear
                   </button>
                 </div>
               )}
 
-              {/* ── Selected Location Detail ── */}
+              {/* ── Cascade levels ── */}
+              <div className="px-4 py-3 space-y-3">
+                {renderLevel(TYPE_IDS.ZONE, zones, null, null, false)}
+
+                {cascade.zoneId !== '' && renderLevel(
+                  TYPE_IDS.AISLE, aisles, zoneLoc?.name ?? null, cascade.zoneId === '' ? null : cascade.zoneId, false,
+                )}
+
+                {cascade.aisleId !== '' && renderLevel(
+                  TYPE_IDS.BAY, bays, aisleLoc?.name ?? null, cascade.aisleId === '' ? null : cascade.aisleId, true,
+                )}
+
+                {cascade.bayId !== '' && renderLevel(
+                  TYPE_IDS.ROW, rowItems, bayLoc?.name ?? null, cascade.bayId === '' ? null : cascade.bayId, false,
+                )}
+              </div>
+
+              {/* ── Focused node card + items panel ── */}
               {selected && (
                 <div className="border-t border-gray-200 px-4 py-3 space-y-3">
                   <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">{selected.name}</p>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{selected.name}</p>
                       <p className="text-xs text-gray-500">
-                        {typeMap.get(selected.typeId) || 'Location'} &middot; <span className="font-mono">{selected.shortCode}</span>
+                        {typeMap.get(selected.typeId) || TYPE_LABELS[selected.typeId] || 'Location'} &middot;{' '}
+                        <span className="font-mono">{selected.shortCode}</span>
                       </p>
                     </div>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => openEdit(selected)} className="p-1.5 text-gray-400 hover:text-indigo-600 rounded">
+                      <button
+                        onClick={() => openEdit(selected)}
+                        className="p-1.5 text-gray-400 hover:text-indigo-600 rounded"
+                        title="Rename"
+                      >
                         <Pencil size={14} />
                       </button>
-                      <button onClick={() => handleDelete(selected.id)} className="p-1.5 text-gray-400 hover:text-red-600 rounded">
+                      <button
+                        onClick={() => handleDelete(selected)}
+                        className="p-1.5 text-gray-400 hover:text-red-600 rounded"
+                        title="Delete"
+                      >
                         <Trash2 size={14} />
                       </button>
                     </div>
