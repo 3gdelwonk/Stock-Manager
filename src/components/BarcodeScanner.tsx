@@ -117,13 +117,17 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
       return false  // unknown — don't trust it
     }
 
-    const baseConstraints = {
-      width:     { min: 640, ideal: 1920 },
-      height:    { min: 480, ideal: 1080 },
-      frameRate: { ideal: 30, max: 60 },
-    }
+    // html5-qrcode validates: when cameraIdOrConfig is an object it must
+    // have EXACTLY ONE key — just `deviceId` or just `facingMode`. Additional
+    // constraints (width/height/frameRate) go in configuration.videoConstraints.
+    // Packing everything into the first arg throws
+    //   "camera or config should have exactly 1 key if passed as an object"
+    // and the scanner silently falls back to some default flow.
+    type CameraSelector =
+      | { deviceId: ConstrainDOMString }
+      | { facingMode: ConstrainDOMString }
 
-    const resolveBackCamConstraints = async (): Promise<MediaTrackConstraints> => {
+    const resolveBackCamSelector = async (): Promise<CameraSelector> => {
       // STEP 1 — exact environment probe. If it resolves AND the resulting
       // track is verifiably back-facing, capture its deviceId so subsequent
       // scanner.start is pinned to the same device.
@@ -140,8 +144,8 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
           if (verified) {
             setCameraLabel(label || 'Back camera')
             return dId
-              ? { deviceId: { exact: dId }, ...baseConstraints }
-              : { facingMode: { exact: 'environment' }, ...baseConstraints }
+              ? { deviceId: { exact: dId } }
+              : { facingMode: { exact: 'environment' } }
           }
           // Probe resolved with the WRONG camera — don't trust facingMode.
           // Fall through to explicit enumeration.
@@ -166,7 +170,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
         const byLabel = inputs.find(d => /back|rear|environment|world/i.test(d.label))
         if (byLabel) {
           setCameraLabel(byLabel.label || 'Back camera')
-          return { deviceId: { exact: byLabel.deviceId }, ...baseConstraints }
+          return { deviceId: { exact: byLabel.deviceId } }
         }
 
         // Verify path — try each device, pick the first that looks back-facing.
@@ -181,7 +185,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
             s.getTracks().forEach(x => x.stop())
             if (isBack) {
               setCameraLabel(label || 'Back camera')
-              return { deviceId: { exact: d.deviceId }, ...baseConstraints }
+              return { deviceId: { exact: d.deviceId } }
             }
           } catch { /* try next */ }
         }
@@ -190,7 +194,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
         const notFront = inputs.find(d => d.label && !/front|user|selfie|face/i.test(d.label))
         if (notFront) {
           setCameraLabel(`${notFront.label} (unverified)`)
-          return { deviceId: { exact: notFront.deviceId }, ...baseConstraints }
+          return { deviceId: { exact: notFront.deviceId } }
         }
       } catch { /* enumeration unavailable */ }
 
@@ -198,15 +202,14 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
       // we asked for exact:environment so it'll fail loudly on devices that
       // can't honour it, rather than silently opening the user-facing cam.
       setCameraLabel('facingMode fallback')
-      return { facingMode: { exact: 'environment' }, ...baseConstraints } as MediaTrackConstraints
+      return { facingMode: { exact: 'environment' } }
     }
 
-    resolveBackCamConstraints().then(constraints => scanner
+    resolveBackCamSelector().then(selector => scanner
       .start(
-        // Passing MediaTrackConstraints (not a string) so html5-qrcode uses
-        // it verbatim as the `video: ...` object without merging a separate
-        // videoConstraints and potentially stomping our deviceId.
-        constraints,
+        // First arg MUST be exactly 1 key (html5-qrcode validates this).
+        // Additional constraints go in configuration.videoConstraints.
+        selector as unknown as MediaTrackConstraints,
         {
           fps: 20,
           // Wide, short box matches the 3.5:1 aspect of EAN-13 / UPC-A.
@@ -214,6 +217,12 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
           qrbox: { width: 340, height: 160 },
           aspectRatio: 1.7778,    // 16:9 widescreen → full horizontal resolution
           disableFlip: true,       // 1D barcodes don't need mirror check; saves CPU
+          // Resolution / frame-rate hints live here, NOT in the selector.
+          videoConstraints: {
+            width:     { min: 640, ideal: 1920 },
+            height:    { min: 480, ideal: 1080 },
+            frameRate: { ideal: 30, max: 60 },
+          } as MediaTrackConstraints,
         },
         (decodedText) => {
           if (!activeRef.current) return
