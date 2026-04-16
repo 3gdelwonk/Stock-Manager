@@ -49,6 +49,16 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
   // the whole candidate queue after an exhaust/error without forcing the user
   // to close and reopen the sheet.
   const [retryToken, setRetryToken]     = useState(0)
+  // Per-candidate diagnostic log — populated as the queue is walked so that
+  // on failure the user can see what each candidate actually reported
+  // (deviceId prefix, label, facingMode, decision). Invaluable for diagnosing
+  // browsers that lie about facingMode or silently ignore deviceId constraints.
+  const [scanLog, setScanLog] = useState<Array<{ cand: string; label: string; fm: string; decision: string }>>([])
+  // If true, the queue's first candidate is used regardless of the
+  // front/back verdict. Toggled by the "Use anyway" button in the error state
+  // — an escape hatch for devices where both cams report facingMode='user'
+  // but one of them IS actually the back cam.
+  const forceAcceptRef = useRef(false)
 
   const applyZoom = useCallback((newZoom: number) => {
     const track = trackRef.current
@@ -83,20 +93,9 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     setTorch(false)
     setTorchSupported(false)
     setCameraLabel('')
+    setScanLog([])
     trackRef.current  = null
     activeRef.current = true
-
-    // experimentalFeatures.useBarCodeDetectorIfSupported — on Chrome/Android this
-    // delegates to the native BarcodeDetector API (ML Kit on Android, OS API on
-    // desktop).  The native detector handles damaged, low-contrast, and
-    // far-away barcodes far better than the JS ZXing fallback because it runs
-    // at the OS/GPU level with sub-pixel processing.
-    const scanner = new Html5Qrcode('barcode-reader', {
-      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-      formatsToSupport: GROCERY_FORMATS,
-      verbose: false,
-    })
-    scannerRef.current = scanner
 
     const configuration = {
       fps: 20,
@@ -112,14 +111,28 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
       } as MediaTrackConstraints,
     }
 
+    // experimentalFeatures.useBarCodeDetectorIfSupported — on Chrome/Android this
+    // delegates to the native BarcodeDetector API (ML Kit on Android, OS API on
+    // desktop).  The native detector handles damaged, low-contrast, and
+    // far-away barcodes far better than the JS ZXing fallback because it runs
+    // at the OS/GPU level with sub-pixel processing.
+    const makeScanner = () => new Html5Qrcode('barcode-reader', {
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      formatsToSupport: GROCERY_FORMATS,
+      verbose: false,
+    })
+
     const onDecode = (decodedText: string) => {
       if (!activeRef.current) return
-      activeRef.current  = false
+      activeRef.current = false
+      const s = scannerRef.current
       scannerRef.current = null
       trackRef.current   = null
-      scanner.stop()
-        .then(() => { try { scanner.clear() } catch {} })
-        .catch(() => { try { scanner.clear() } catch {} })
+      if (s) {
+        s.stop()
+          .then(() => { try { s.clear() } catch {} })
+          .catch(() => { try { s.clear() } catch {} })
+      }
       onScanRef.current(decodedText)
     }
 
@@ -218,37 +231,57 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     }
 
     // Start scanner.start() against each candidate in turn. After each start,
-    // read the LIVE video track's facingMode + label. If clearly user-facing,
-    // stop and advance to the next candidate. If ambiguous (empty label, no
-    // facingMode reported) accept it — better than rejecting a valid back cam.
+    // read the LIVE video track's facingMode + label. Only reject when BOTH
+    // signals agree it's front-facing (fm === 'user' AND label doesn't say
+    // back) — some browsers lie about facingMode on legitimate back cams, so
+    // a label saying "Back Camera" wins even if fm claims user. A fresh
+    // Html5Qrcode instance is created per iteration: reusing one instance
+    // across stop/start is unreliable on several browsers — it can keep the
+    // first opened camera regardless of subsequent constraints.
     const tryStartPinned = async (): Promise<void> => {
       const queue = await buildCandidateQueue()
+      const log: Array<{ cand: string; label: string; fm: string; decision: string }> = []
 
-      for (const cand of queue) {
+      for (let i = 0; i < queue.length; i++) {
         if (!activeRef.current) return  // unmounted mid-loop
+        const cand = queue[i]
+
+        const candStr = cand.kind === 'device'
+          ? `dev:${cand.deviceId.slice(0, 8)}…${cand.label ? ` [${cand.label}]` : ''}`
+          : 'facingMode:environment'
 
         const selector: MediaTrackConstraints = cand.kind === 'device'
           ? { deviceId: { exact: cand.deviceId } }
           : { facingMode: { exact: 'environment' } }
 
+        // Fresh instance per iteration — avoids the html5-qrcode stop/start
+        // camera-sticking bug where reusing one instance keeps the first
+        // opened camera regardless of subsequent deviceId/facingMode.
+        const s = makeScanner()
+        scannerRef.current = s
+
         try {
-          // First arg MUST be exactly 1 key (html5-qrcode validates this).
-          // Additional constraints live in configuration.videoConstraints.
-          await scanner.start(
+          await s.start(
             selector as unknown as MediaTrackConstraints,
             configuration,
             onDecode,
             () => {},
           )
-        } catch {
-          // OverconstrainedError, NotFoundError, etc. — next candidate.
+        } catch (e) {
+          log.push({
+            cand: candStr,
+            label: '',
+            fm: '',
+            decision: `start failed: ${(e as Error).message?.slice(0, 60) ?? 'unknown'}`,
+          })
+          setScanLog([...log])
+          try { s.clear() } catch {}
           continue
         }
 
         if (!activeRef.current) {
-          // Sheet closed while we were starting — tear down and bail.
-          try { await scanner.stop() } catch {}
-          try { scanner.clear() } catch {}
+          try { await s.stop() } catch {}
+          try { s.clear() } catch {}
           return
         }
 
@@ -256,28 +289,62 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
         if (!liveTrack) {
           // Scanner running but we can't inspect the track. Trust it.
           setCameraLabel(cand.kind === 'device' ? (cand.label || 'Camera active') : 'Camera active')
+          log.push({ cand: candStr, label: '?', fm: '?', decision: 'accepted (no track info)' })
+          setScanLog([...log])
           return
         }
 
         const settings = (liveTrack.getSettings?.() as Record<string, unknown> | undefined) ?? {}
         const fm       = typeof settings.facingMode === 'string' ? settings.facingMode : ''
         const label    = liveTrack.label ?? ''
-        const isFront  = fm === 'user' || /front|user|selfie|face/i.test(label)
+
+        // Soft rejection: only reject when BOTH signals agree it's front.
+        // If the label clearly says back/rear/environment, trust the label
+        // even if facingMode lies. Empty or ambiguous labels → accept.
+        const labelSaysBack  = /back|rear|environment|world/i.test(label)
+        const labelSaysFront = /front|user|selfie|face/i.test(label)
+        const fmSaysFront    = fm === 'user'
+
+        // Escape hatch: first iteration after user clicked "Use anyway" — accept unconditionally.
+        const userForced = forceAcceptRef.current && i === 0
+        if (userForced) forceAcceptRef.current = false
+
+        const isFront = !userForced && !labelSaysBack && (fmSaysFront || labelSaysFront)
 
         if (!isFront) {
-          setCameraLabel(label || 'Back camera')
+          const decisionText = userForced
+            ? 'forced-accept (user override)'
+            : labelSaysBack
+              ? 'accepted (label=back)'
+              : fmSaysFront
+                ? 'accepted (fm=user but label ambiguous)'
+                : 'accepted'
+          log.push({ cand: candStr, label, fm: fm || '(none)', decision: decisionText })
+          setScanLog([...log])
+          setCameraLabel(label || 'Camera active')
           attachZoomTorchFocus(liveTrack)
           return
         }
 
-        // Clearly front — stop and try the next candidate.
+        // Clearly front — stop and try next.
+        log.push({
+          cand: candStr,
+          label,
+          fm: fm || '(none)',
+          decision: `rejected (fm=${fm || '?'} label=${labelSaysFront ? 'front' : 'ambiguous'})`,
+        })
+        setScanLog([...log])
         setCameraLabel(`Rejected: ${label || 'user-facing'} — trying next…`)
-        try { await scanner.stop() } catch {}
+        try { await s.stop() } catch {}
+        try { s.clear() } catch {}
+        scannerRef.current = null
       }
 
-      // Queue exhausted — no non-front cam on this device. Show error + Retry.
+      // Queue exhausted. Show a detailed error with the log + a "Use anyway"
+      // escape hatch so the user can still get a scanner if all candidates
+      // appeared user-facing.
       if (activeRef.current) {
-        setError('No back-facing camera detected on this device.')
+        setError('No back-facing camera detected. Tap "Use anyway" to force the best candidate.')
       }
     }
 
@@ -327,6 +394,14 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     setError(null)
     setCameraLabel('')
     setRetryToken(t => t + 1)
+  }
+
+  function handleForceUse() {
+    // User override: accept the first candidate unconditionally on the next
+    // retry pass. Covers devices where every cam reports facingMode='user'
+    // but one of them IS actually the back cam.
+    forceAcceptRef.current = true
+    handleRetry()
   }
 
   function handleZoomIn() {
@@ -419,17 +494,39 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
       )}
 
       {error ? (
-        <div className="px-6 pb-6 text-center space-y-3">
+        <div className="px-6 pb-6 space-y-3">
           <div className="flex items-center justify-center gap-2 text-red-400">
             <AlertTriangle size={16} />
-            <p className="text-sm">{error}</p>
+            <p className="text-sm text-center">{error}</p>
           </div>
-          <div className="flex items-center justify-center gap-3">
+          {scanLog.length > 0 && (
+            <div className="max-h-40 overflow-auto rounded-md bg-white/5 p-2 text-[10px] leading-snug text-white/60 font-mono">
+              <p className="text-white/50 mb-1">Candidate log:</p>
+              {scanLog.map((row, idx) => (
+                <div key={idx} className="break-all">
+                  <span className="text-white/80">{idx + 1}. {row.cand}</span>
+                  {' '}· fm=<span className="text-white/80">{row.fm}</span>
+                  {' '}· label=<span className="text-white/80">{row.label || '(empty)'}</span>
+                  <div className={/rejected|failed/.test(row.decision) ? 'text-red-300' : 'text-emerald-300'}>
+                    → {row.decision}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center justify-center gap-3 flex-wrap">
             <button
               onClick={handleRetry}
               className="inline-flex items-center gap-1.5 text-sm text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg"
             >
               <RotateCcw size={14} /> Retry
+            </button>
+            <button
+              onClick={handleForceUse}
+              className="inline-flex items-center gap-1.5 text-sm text-white bg-amber-600/70 hover:bg-amber-600 px-3 py-1.5 rounded-lg"
+              title="Force the first candidate even if it appears user-facing"
+            >
+              Use anyway
             </button>
             <button onClick={handleClose} className="text-sm text-white/70 underline">
               Close
