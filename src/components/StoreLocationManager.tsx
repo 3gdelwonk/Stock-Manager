@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   X, Plus, MapPin, Trash2, Pencil, Check, Loader2, ChevronRight,
-  Package, Search, AlertCircle,
+  Package, Search, AlertCircle, ScanBarcode,
 } from 'lucide-react'
 import {
   getLocationTypes, getLocations, createLocation, updateLocation, deleteLocation,
@@ -11,6 +11,7 @@ import {
 } from '../lib/jarvis'
 import { TYPE_IDS, TYPE_LABELS, groupByPrefix } from '../lib/locationUtils'
 import { useCascadeState } from './LocationCascade'
+import BarcodeScanner from './BarcodeScanner'
 
 // Resolve any user-entered code (barcode or itemCode) to a confirmed itemCode
 // using the same JARVISmart search endpoint as the product search bar.
@@ -104,6 +105,17 @@ export default function StoreLocationManager({ open, onClose }: Props) {
   const [assignQuery, setAssignQuery] = useState('')
   const [assigning, setAssigning] = useState(false)
   const [assignResult, setAssignResult] = useState<string | null>(null)
+  const [scannerOpen, setScannerOpen] = useState(false)
+
+  // Scanned code gets appended to the bulk-assign textbox. The existing
+  // handleBulkAssign splits on commas/whitespace, so repeated scans stack
+  // cleanly and the user can still hit Assign All when ready.
+  function handleScan(code: string) {
+    const trimmed = code.trim()
+    if (!trimmed) return
+    setAssignQuery(q => q.trim() ? `${q.trim()}, ${trimmed}` : trimmed)
+    setScannerOpen(false)
+  }
 
   // Flatten tree to flat list (works whether getLocations returns nested or flat)
   const flatList = useMemo<StoreLocation[]>(() => {
@@ -573,6 +585,15 @@ export default function StoreLocationManager({ open, onClose }: Props) {
                           />
                         </div>
                         <button
+                          type="button"
+                          onClick={() => setScannerOpen(true)}
+                          className="px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg flex items-center gap-1 text-xs font-medium hover:bg-indigo-700"
+                          title="Scan barcode"
+                        >
+                          <ScanBarcode size={14} />
+                          <span className="hidden xs:inline">Scan</span>
+                        </button>
+                        <button
                           onClick={handleBulkAssign}
                           disabled={assigning || !assignQuery.trim()}
                           className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg disabled:opacity-50"
@@ -620,6 +641,12 @@ export default function StoreLocationManager({ open, onClose }: Props) {
           )}
         </div>
       </div>
+
+      <BarcodeScanner
+        open={scannerOpen}
+        onScan={handleScan}
+        onClose={() => setScannerOpen(false)}
+      />
     </>
   )
 }

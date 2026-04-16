@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
-import { X, AlertTriangle, ZoomIn, ZoomOut, Zap, ZapOff } from 'lucide-react'
+import { X, AlertTriangle, ZoomIn, ZoomOut, Zap, ZapOff, RotateCcw } from 'lucide-react'
 
 interface BarcodeScannerProps {
   open: boolean
@@ -21,6 +21,13 @@ const GROCERY_FORMATS = [
   Html5QrcodeSupportedFormats.QR_CODE,  // QR labels / shelf tags
 ]
 
+// Candidate in the ordered start-and-verify queue. Either a specific device
+// (preferred — we inspect the live track after start() and reject if front)
+// or a bare facingMode selector as a final browser-picks-for-us net.
+type Candidate =
+  | { kind: 'device'; deviceId: string; label: string }
+  | { kind: 'facingMode' }
+
 export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScannerProps) {
   const scannerRef   = useRef<Html5Qrcode | null>(null)
   const onScanRef    = useRef(onScan)
@@ -38,6 +45,10 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
   // Diagnostic: surface the camera's actual label so if the wrong one is
   // picked we can see WHICH camera was selected instead of guessing.
   const [cameraLabel, setCameraLabel]   = useState<string>('')
+  // Bumping this re-runs the effect — used by the Retry button to re-attempt
+  // the whole candidate queue after an exhaust/error without forcing the user
+  // to close and reopen the sheet.
+  const [retryToken, setRetryToken]     = useState(0)
 
   const applyZoom = useCallback((newZoom: number) => {
     const track = trackRef.current
@@ -87,212 +98,193 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     })
     scannerRef.current = scanner
 
-    // Pin the rear camera. Previous attempts using `facingMode: 'environment'`
-    // (hard or soft) AND passing a string deviceId into html5-qrcode both
-    // silently landed on the front camera on some devices. Root causes:
-    //
-    //   • Some browsers honour `{ exact: 'environment' }` as a SOFT pref —
-    //     getUserMedia resolves with the front cam anyway.
-    //   • Labels on enumerateDevices() can be blank pre-permission, so
-    //     "pick by label" heuristics pick the wrong id.
-    //   • html5-qrcode merges our `videoConstraints` into the request and
-    //     can override a deviceId constraint in surprising ways.
-    //
-    // This picker is paranoid: it resolves a full MediaTrackConstraints
-    // object ourselves (bypassing html5-qrcode's own merge) and VERIFIES
-    // the winning camera is actually back-facing by inspecting the track's
-    // getSettings().facingMode AND its label — discarding the stream and
-    // trying the next candidate if either check fails. The selected
-    // camera's label is published to `cameraLabel` state so the overlay
-    // can show the user which one was chosen.
-    const looksBackFacing = (track: MediaStreamTrack): boolean => {
-      const s = (track.getSettings?.() ?? {}) as Record<string, unknown>
-      const fm = typeof s.facingMode === 'string' ? s.facingMode : ''
-      if (fm === 'environment') return true
-      if (fm === 'user')        return false
-      // facingMode absent — fall back to label heuristic.
-      const lbl = track.label ?? ''
-      if (/back|rear|environment|world/i.test(lbl)) return true
-      if (/front|user|selfie|face/i.test(lbl))      return false
-      return false  // unknown — don't trust it
+    const configuration = {
+      fps: 20,
+      // Wide, short box matches the 3.5:1 aspect of EAN-13 / UPC-A.
+      // More horizontal pixels captured → better bar resolution at distance.
+      qrbox: { width: 340, height: 160 },
+      aspectRatio: 1.7778,     // 16:9 widescreen → full horizontal resolution
+      disableFlip: true,        // 1D barcodes don't need mirror check; saves CPU
+      videoConstraints: {
+        width:     { min: 640, ideal: 1920 },
+        height:    { min: 480, ideal: 1080 },
+        frameRate: { ideal: 30, max: 60 },
+      } as MediaTrackConstraints,
     }
 
-    // html5-qrcode validates: when cameraIdOrConfig is an object it must
-    // have EXACTLY ONE key — just `deviceId` or just `facingMode`. Additional
-    // constraints (width/height/frameRate) go in configuration.videoConstraints.
-    // Packing everything into the first arg throws
-    //   "camera or config should have exactly 1 key if passed as an object"
-    // and the scanner silently falls back to some default flow.
-    type CameraSelector =
-      | { deviceId: ConstrainDOMString }
-      | { facingMode: ConstrainDOMString }
+    const onDecode = (decodedText: string) => {
+      if (!activeRef.current) return
+      activeRef.current  = false
+      scannerRef.current = null
+      trackRef.current   = null
+      scanner.stop()
+        .then(() => { try { scanner.clear() } catch {} })
+        .catch(() => { try { scanner.clear() } catch {} })
+      onScanRef.current(decodedText)
+    }
 
-    const resolveBackCamSelector = async (): Promise<CameraSelector> => {
-      // STEP 1 — exact environment probe. If it resolves AND the resulting
-      // track is verifiably back-facing, capture its deviceId so subsequent
-      // scanner.start is pinned to the same device.
+    const readLiveTrack = (): MediaStreamTrack | null => {
+      const videoEl = document.querySelector('#barcode-reader video') as HTMLVideoElement | null
+      return videoEl?.srcObject instanceof MediaStream
+        ? (videoEl.srcObject.getVideoTracks()[0] ?? null)
+        : null
+    }
+
+    // Wire up zoom / torch / continuous-autofocus once we've committed to a
+    // verified back-facing track. Called only on a successful (non-rejected)
+    // start so we don't reset state across retry iterations.
+    const attachZoomTorchFocus = (track: MediaStreamTrack) => {
       try {
-        const probe = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { exact: 'environment' } },
-        })
-        const track = probe.getVideoTracks()[0]
-        if (track) {
-          const verified = looksBackFacing(track)
-          const dId      = track.getSettings?.()?.deviceId
-          const label    = track.label ?? ''
-          probe.getTracks().forEach(t => t.stop())
-          if (verified) {
-            setCameraLabel(label || 'Back camera')
-            return dId
-              ? { deviceId: { exact: dId } }
-              : { facingMode: { exact: 'environment' } }
+        trackRef.current = track
+        const caps = track.getCapabilities?.() as Record<string, unknown> | undefined
+
+        // ── Zoom ────────────────────────────────────────────────────────────
+        const zoomCap = caps?.zoom as { min?: number; max?: number; step?: number } | undefined
+        if (zoomCap?.max && zoomCap.max > 1) {
+          const min = zoomCap.min ?? 1
+          const max = zoomCap.max
+          setZoomRange({ min, max })
+          // Start at 20% of zoom range — enough extra reach for shelf labels
+          // without sacrificing the wide field of view for close scanning.
+          const defaultZoom = Math.min(min + (max - min) * 0.20, max)
+          if (defaultZoom > 1) {
+            track.applyConstraints({ advanced: [{ zoom: defaultZoom } as MediaTrackConstraintSet] } as MediaTrackConstraints)
+            setZoom(defaultZoom)
           }
-          // Probe resolved with the WRONG camera — don't trust facingMode.
-          // Fall through to explicit enumeration.
         }
-      } catch { /* probe rejected — enumerate */ }
 
-      // STEP 2 — enumerate and VERIFY each camera by opening it. Open each
-      // videoinput in turn, inspect the resulting track, stop it, and
-      // remember the first one that verifies as back-facing. Slower than
-      // guessing but reliable even with blank labels.
+        // ── Torch ───────────────────────────────────────────────────────────
+        if ((caps as Record<string, unknown> | undefined)?.torch) {
+          setTorchSupported(true)
+        }
+
+        // ── Continuous autofocus ────────────────────────────────────────────
+        // Ensures the camera re-focuses as distance to the barcode changes.
+        const focusModes = (caps as Record<string, unknown> | undefined)?.focusMode as string[] | undefined
+        if (focusModes?.includes('continuous')) {
+          track.applyConstraints({
+            advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+          } as MediaTrackConstraints).catch(() => {})
+        }
+      } catch { /* older browser — no extended camera API */ }
+    }
+
+    // Build the ordered candidate queue. Previous pickers tried to pre-verify
+    // the back cam via getUserMedia probes, then committed to a single
+    // scanner.start() call; if any browser-quirk resolved that call to the
+    // front cam (happens on iOS Safari / some Android Chromes even with
+    // { exact: 'environment' }), we had no recovery path. Now we treat the
+    // LIVE track post-start as the source of truth and retry from the queue.
+    const buildCandidateQueue = async (): Promise<Candidate[]> => {
+      const out: Candidate[] = []
+
+      // Prime permissions so enumerateDevices() returns non-empty labels.
+      // Uses 'ideal' (not 'exact') so desktops with only a front cam still
+      // resolve rather than throw — the probe is just for label visibility.
       try {
-        // Ensure we have camera permission so enumerateDevices returns labels.
-        try {
-          const s = await navigator.mediaDevices.getUserMedia({ video: true })
-          s.getTracks().forEach(t => t.stop())
-        } catch { /* permission may still be valid from probe above */ }
+        const s = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+        })
+        s.getTracks().forEach(t => t.stop())
+      } catch { /* permission may still be valid; continue */ }
 
+      try {
         const devices = await navigator.mediaDevices.enumerateDevices()
         const inputs  = devices.filter(d => d.kind === 'videoinput')
 
-        // Fast path — any device whose label clearly says back/rear.
-        const byLabel = inputs.find(d => /back|rear|environment|world/i.test(d.label))
-        if (byLabel) {
-          setCameraLabel(byLabel.label || 'Back camera')
-          return { deviceId: { exact: byLabel.deviceId } }
-        }
+        // Score: obvious-back (0) before unknown (1) before obvious-front (2).
+        // We keep obvious-front in the queue so a single-cam laptop still
+        // scans (with a visible red diagnostic label), rather than failing
+        // entirely.
+        const scored = inputs
+          .map(d => ({
+            d,
+            score: /back|rear|environment|world/i.test(d.label) ? 0
+                 : /front|user|selfie|face/i.test(d.label) ? 2
+                 : 1,
+          }))
+          .sort((a, b) => a.score - b.score)
 
-        // Verify path — try each device, pick the first that looks back-facing.
-        for (const d of inputs) {
-          try {
-            const s     = await navigator.mediaDevices.getUserMedia({
-              video: { deviceId: { exact: d.deviceId } },
-            })
-            const t     = s.getVideoTracks()[0]
-            const isBack = t ? looksBackFacing(t) : false
-            const label  = t?.label ?? d.label ?? ''
-            s.getTracks().forEach(x => x.stop())
-            if (isBack) {
-              setCameraLabel(label || 'Back camera')
-              return { deviceId: { exact: d.deviceId } }
-            }
-          } catch { /* try next */ }
-        }
-
-        // Nothing verified — fall back to "not obviously front" label heuristic.
-        const notFront = inputs.find(d => d.label && !/front|user|selfie|face/i.test(d.label))
-        if (notFront) {
-          setCameraLabel(`${notFront.label} (unverified)`)
-          return { deviceId: { exact: notFront.deviceId } }
+        for (const { d } of scored) {
+          out.push({ kind: 'device', deviceId: d.deviceId, label: d.label })
         }
       } catch { /* enumeration unavailable */ }
 
-      // STEP 3 — last resort. Let the browser pick by facingMode; at least
-      // we asked for exact:environment so it'll fail loudly on devices that
-      // can't honour it, rather than silently opening the user-facing cam.
-      setCameraLabel('facingMode fallback')
-      return { facingMode: { exact: 'environment' } }
+      // Final net for devices that refuse enumerate() — let the browser pick
+      // via facingMode. `exact` so a browser that can't honour environment
+      // rejects cleanly (the loop's catch ignores it and ends the queue).
+      out.push({ kind: 'facingMode' })
+      return out
     }
 
-    resolveBackCamSelector().then(selector => scanner
-      .start(
-        // First arg MUST be exactly 1 key (html5-qrcode validates this).
-        // Additional constraints go in configuration.videoConstraints.
-        selector as unknown as MediaTrackConstraints,
-        {
-          fps: 20,
-          // Wide, short box matches the 3.5:1 aspect of EAN-13 / UPC-A.
-          // More horizontal pixels captured → better bar resolution at distance.
-          qrbox: { width: 340, height: 160 },
-          aspectRatio: 1.7778,    // 16:9 widescreen → full horizontal resolution
-          disableFlip: true,       // 1D barcodes don't need mirror check; saves CPU
-          // Resolution / frame-rate hints live here, NOT in the selector.
-          videoConstraints: {
-            width:     { min: 640, ideal: 1920 },
-            height:    { min: 480, ideal: 1080 },
-            frameRate: { ideal: 30, max: 60 },
-          } as MediaTrackConstraints,
-        },
-        (decodedText) => {
-          if (!activeRef.current) return
-          activeRef.current  = false
-          scannerRef.current = null
-          trackRef.current   = null
-          scanner.stop()
-            .then(() => { try { scanner.clear() } catch {} })
-            .catch(() => { try { scanner.clear() } catch {} })
-          onScanRef.current(decodedText)
-        },
-        () => {},
-      )
-      .then(() => {
+    // Start scanner.start() against each candidate in turn. After each start,
+    // read the LIVE video track's facingMode + label. If clearly user-facing,
+    // stop and advance to the next candidate. If ambiguous (empty label, no
+    // facingMode reported) accept it — better than rejecting a valid back cam.
+    const tryStartPinned = async (): Promise<void> => {
+      const queue = await buildCandidateQueue()
+
+      for (const cand of queue) {
+        if (!activeRef.current) return  // unmounted mid-loop
+
+        const selector: MediaTrackConstraints = cand.kind === 'device'
+          ? { deviceId: { exact: cand.deviceId } }
+          : { facingMode: { exact: 'environment' } }
+
         try {
-          const videoEl = document.querySelector('#barcode-reader video') as HTMLVideoElement | null
-          const track   = videoEl?.srcObject instanceof MediaStream
-            ? videoEl.srcObject.getVideoTracks()[0]
-            : null
-          if (!track) return
-          trackRef.current = track
+          // First arg MUST be exactly 1 key (html5-qrcode validates this).
+          // Additional constraints live in configuration.videoConstraints.
+          await scanner.start(
+            selector as unknown as MediaTrackConstraints,
+            configuration,
+            onDecode,
+            () => {},
+          )
+        } catch {
+          // OverconstrainedError, NotFoundError, etc. — next candidate.
+          continue
+        }
 
-          // Refresh the diagnostic with the LIVE track — catches cases where
-          // html5-qrcode re-negotiated to a different camera than what we
-          // resolved. A " (user-facing!)" suffix highlights when the live
-          // camera disagrees with what we asked for.
-          {
-            const liveLabel = track.label ?? ''
-            const fm        = (track.getSettings?.() as Record<string, unknown> | undefined)?.facingMode
-            const wrong     = fm === 'user' || /front|user|selfie|face/i.test(liveLabel)
-            if (liveLabel) {
-              setCameraLabel(wrong ? `${liveLabel} (user-facing!)` : liveLabel)
-            }
-          }
+        if (!activeRef.current) {
+          // Sheet closed while we were starting — tear down and bail.
+          try { await scanner.stop() } catch {}
+          try { scanner.clear() } catch {}
+          return
+        }
 
-          const caps = track.getCapabilities?.() as Record<string, unknown> | undefined
+        const liveTrack = readLiveTrack()
+        if (!liveTrack) {
+          // Scanner running but we can't inspect the track. Trust it.
+          setCameraLabel(cand.kind === 'device' ? (cand.label || 'Camera active') : 'Camera active')
+          return
+        }
 
-          // ── Zoom ────────────────────────────────────────────────────────────
-          const zoomCap = caps?.zoom as { min?: number; max?: number; step?: number } | undefined
-          if (zoomCap?.max && zoomCap.max > 1) {
-            const min = zoomCap.min ?? 1
-            const max = zoomCap.max
-            setZoomRange({ min, max })
-            // Start at 20% of zoom range — enough extra reach for shelf labels
-            // without sacrificing the wide field of view for close scanning.
-            const defaultZoom = Math.min(min + (max - min) * 0.20, max)
-            if (defaultZoom > 1) {
-              track.applyConstraints({ advanced: [{ zoom: defaultZoom } as MediaTrackConstraintSet] } as MediaTrackConstraints)
-              setZoom(defaultZoom)
-            }
-          }
+        const settings = (liveTrack.getSettings?.() as Record<string, unknown> | undefined) ?? {}
+        const fm       = typeof settings.facingMode === 'string' ? settings.facingMode : ''
+        const label    = liveTrack.label ?? ''
+        const isFront  = fm === 'user' || /front|user|selfie|face/i.test(label)
 
-          // ── Torch ───────────────────────────────────────────────────────────
-          if ((caps as Record<string, unknown> | undefined)?.torch) {
-            setTorchSupported(true)
-          }
+        if (!isFront) {
+          setCameraLabel(label || 'Back camera')
+          attachZoomTorchFocus(liveTrack)
+          return
+        }
 
-          // ── Continuous autofocus ────────────────────────────────────────────
-          // Ensures the camera re-focuses as distance to the barcode changes.
-          const focusModes = (caps as Record<string, unknown> | undefined)?.focusMode as string[] | undefined
-          if (focusModes?.includes('continuous')) {
-            track.applyConstraints({
-              advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
-            } as MediaTrackConstraints).catch(() => {})
-          }
-        } catch { /* older browser — no extended camera API */ }
-      })
-      .catch((err) => {
-        setError(typeof err === 'string' ? err : (err as Error).message ?? 'Camera not available')
-      }))
+        // Clearly front — stop and try the next candidate.
+        setCameraLabel(`Rejected: ${label || 'user-facing'} — trying next…`)
+        try { await scanner.stop() } catch {}
+      }
+
+      // Queue exhausted — no non-front cam on this device. Show error + Retry.
+      if (activeRef.current) {
+        setError('No back-facing camera detected on this device.')
+      }
+    }
+
+    tryStartPinned().catch((err) => {
+      if (!activeRef.current) return
+      setError(typeof err === 'string' ? err : (err as Error).message ?? 'Camera not available')
+    })
 
     return () => {
       activeRef.current  = false
@@ -305,7 +297,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
           .catch(() => { try { s.clear() } catch {} })
       }
     }
-  }, [open])
+  }, [open, retryToken])
 
   function handleClose() {
     activeRef.current  = false
@@ -318,6 +310,23 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
         .catch(() => { try { s.clear() } catch {} })
     }
     onCloseRef.current()
+  }
+
+  function handleRetry() {
+    // Tear down current scanner then bump retryToken so the effect re-runs
+    // from scratch with a fresh candidate queue.
+    const s = scannerRef.current
+    scannerRef.current = null
+    trackRef.current   = null
+    activeRef.current  = false
+    if (s) {
+      s.stop()
+        .then(() => { try { s.clear() } catch {} })
+        .catch(() => { try { s.clear() } catch {} })
+    }
+    setError(null)
+    setCameraLabel('')
+    setRetryToken(t => t + 1)
   }
 
   function handleZoomIn() {
@@ -339,7 +348,7 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
           <p className="text-sm font-medium text-white">Scan Barcode</p>
           {cameraLabel && (
             <p className={`text-[10px] truncate ${
-              /user-facing!|front|user|selfie/i.test(cameraLabel)
+              /rejected|user-facing!|front|user|selfie/i.test(cameraLabel)
                 ? 'text-red-300'
                 : 'text-white/40'
             }`}>
@@ -415,9 +424,17 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
             <AlertTriangle size={16} />
             <p className="text-sm">{error}</p>
           </div>
-          <button onClick={handleClose} className="text-sm text-white/70 underline">
-            Close and try again
-          </button>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={handleRetry}
+              className="inline-flex items-center gap-1.5 text-sm text-white bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg"
+            >
+              <RotateCcw size={14} /> Retry
+            </button>
+            <button onClick={handleClose} className="text-sm text-white/70 underline">
+              Close
+            </button>
+          </div>
         </div>
       ) : (
         <p className="text-center text-xs text-white/50 pb-6">
