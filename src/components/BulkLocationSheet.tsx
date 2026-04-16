@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Search, ScanBarcode, X, Loader2, Check, Trash2, MapPin,
   AlertCircle, ChevronRight, Package,
@@ -6,9 +6,8 @@ import {
 import {
   searchItems, getLocations, getItemLocations,
   bulkAssignItems, assignItemToLocation,
-  type StockItem,
 } from '../lib/jarvis'
-import { flattenLocations, TYPE_LABELS, LEVEL_ORDER } from '../lib/locationUtils'
+import { flattenLocations } from '../lib/locationUtils'
 import type { FlatLocation } from '../lib/locationUtils'
 import LocationCascade, { useCascadeState } from './LocationCascade'
 import BarcodeScanner from './BarcodeScanner'
@@ -71,7 +70,6 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
   const cascade = useCascadeState()
 
   // Assign step
-  const [assigning, setAssigning] = useState(false)
   const [assignResults, setAssignResults] = useState<AssignResult[]>([])
   const [progress, setProgress] = useState({ done: 0, total: 0 })
 
@@ -476,6 +474,7 @@ export default function BulkLocationSheet({ open, onClose }: BulkLocationSheetPr
       {/* Barcode scanner */}
       {scannerOpen && (
         <BarcodeScanner
+          open={scannerOpen}
           onScan={handleBarcodeScan}
           onClose={() => setScannerOpen(false)}
         />

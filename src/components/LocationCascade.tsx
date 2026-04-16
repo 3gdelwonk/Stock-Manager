@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { FlatLocation, LevelOption } from '../lib/locationUtils'
-import { TYPE_IDS, LEVEL_ORDER, TYPE_LABELS, groupByPrefix } from '../lib/locationUtils'
+import { TYPE_IDS, groupByPrefix } from '../lib/locationUtils'
 
 // ── Level column chip component ─────────────────────────────────────────────
 
