@@ -133,6 +133,7 @@ export default function SmartScanner({
           aspectRatio: 1.7778,
           disableFlip: true,
           videoConstraints: {
+            facingMode: { ideal: 'environment' },
             width:     { min: 640, ideal: 1920 },
             height:    { min: 480, ideal: 1080 },
             frameRate: { ideal: 30 },
