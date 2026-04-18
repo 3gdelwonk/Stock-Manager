@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   Search, ScanBarcode, Loader2, Check, Trash2, MapPin,
-  AlertCircle, ChevronRight, Package,
+  AlertCircle, ChevronRight, Package, Settings2,
 } from 'lucide-react'
 import {
   searchItemsSmart, barcodeVariants, searchItems,
@@ -13,6 +13,7 @@ import { flattenLocations, formatLocPath } from '../../lib/locationUtils'
 import type { FlatLocation } from '../../lib/locationUtils'
 import LocationCascade, { useCascadeState } from '../LocationCascade'
 import BarcodeScanner from '../BarcodeScanner'
+import StoreLocationManager from '../StoreLocationManager'
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -53,19 +54,26 @@ export default function CrewBulkLocation() {
   const [flatLocs, setFlatLocs] = useState<FlatLocation[]>([])
   const [locsLoading, setLocsLoading] = useState(false)
   const cascade = useCascadeState()
+  const [managerOpen, setManagerOpen] = useState(false)
 
   // Assign step
   const [assignResults, setAssignResults] = useState<AssignResult[]>([])
   const [progress, setProgress] = useState({ done: 0, total: 0 })
 
-  // Load location tree on mount
+  // Load location tree on mount + after manager closes
+  const [locsVersion, setLocsVersion] = useState(0)
   useEffect(() => {
     setLocsLoading(true)
     getLocations()
       .then(tree => setFlatLocs(flattenLocations(tree)))
       .catch(() => {})
       .finally(() => setLocsLoading(false))
-  }, [])
+  }, [locsVersion])
+
+  function handleManagerClose() {
+    setManagerOpen(false)
+    setLocsVersion(v => v + 1)
+  }
 
   // Fetch + cache existing locations for a single item code.
   async function fetchLocs(code: string): Promise<ItemLocation[]> {
@@ -373,9 +381,17 @@ export default function CrewBulkLocation() {
         <div className="flex-1 overflow-y-auto">
           {/* 1. Target Location (cascade) ── pick destination first */}
           <div className="px-4 pt-3 pb-3 border-b border-gray-100">
-            <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-              Target Location
-            </p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">
+                Target Location
+              </p>
+              <button
+                onClick={() => setManagerOpen(true)}
+                className="flex items-center gap-1 text-[10px] font-semibold text-indigo-600 hover:text-indigo-700 px-2 py-0.5 rounded hover:bg-indigo-50"
+              >
+                <Settings2 size={11} /> Manage
+              </button>
+            </div>
             {locsLoading ? (
               <div className="flex items-center justify-center py-4">
                 <Loader2 size={16} className="text-gray-400 animate-spin" />
@@ -605,6 +621,12 @@ export default function CrewBulkLocation() {
           onClose={() => setScannerOpen(false)}
         />
       )}
+
+      {/* Location manager sheet */}
+      <StoreLocationManager
+        open={managerOpen}
+        onClose={handleManagerClose}
+      />
     </div>
   )
 }
