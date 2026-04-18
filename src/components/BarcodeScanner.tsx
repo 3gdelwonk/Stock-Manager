@@ -105,17 +105,15 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
     // default cam (usually front). We rebuild videoConstraints per iteration
     // with the specific candidate's selector merged in.
     const baseVideoConstraints = {
-      width:     { min: 640, ideal: 1920 },
-      height:    { min: 480, ideal: 1080 },
+      width:     { min: 1280, ideal: 3840 },
+      height:    { min: 720, ideal: 2160 },
       frameRate: { ideal: 30, max: 60 },
     } as const
     const baseConfig = {
-      fps: 20,
-      // Wide, short box matches the 3.5:1 aspect of EAN-13 / UPC-A.
-      // More horizontal pixels captured → better bar resolution at distance.
+      fps: 30,
       qrbox: { width: 340, height: 160 },
-      aspectRatio: 1.7778,     // 16:9 widescreen → full horizontal resolution
-      disableFlip: true,        // 1D barcodes don't need mirror check; saves CPU
+      aspectRatio: 1.7778,
+      disableFlip: true,
     }
 
     // experimentalFeatures.useBarCodeDetectorIfSupported — on Chrome/Android this
@@ -178,14 +176,18 @@ export default function BarcodeScanner({ open, onScan, onClose }: BarcodeScanner
           setTorchSupported(true)
         }
 
-        // ── Continuous autofocus ────────────────────────────────────────────
-        // Ensures the camera re-focuses as distance to the barcode changes.
-        const focusModes = (caps as Record<string, unknown> | undefined)?.focusMode as string[] | undefined
-        if (focusModes?.includes('continuous')) {
-          track.applyConstraints({
-            advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
-          } as MediaTrackConstraints).catch(() => {})
-        }
+        // ── Autofocus + exposure + white balance ────────────────────────────
+        // Each advanced constraint set is applied independently by the browser;
+        // unsupported ones are silently skipped. Continuous exposure adapts to
+        // fluorescent / daylight / dim shelves; white balance handles colour
+        // temperature shifts on reflective packaging and matte labels.
+        track.applyConstraints({
+          advanced: [
+            { focusMode: 'continuous' } as MediaTrackConstraintSet,
+            { exposureMode: 'continuous' } as MediaTrackConstraintSet,
+            { whiteBalanceMode: 'continuous' } as MediaTrackConstraintSet,
+          ],
+        } as MediaTrackConstraints).catch(() => {})
       } catch { /* older browser — no extended camera API */ }
     }
 

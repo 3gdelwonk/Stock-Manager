@@ -421,11 +421,11 @@ function useBarcodeCamera(onDetected: (barcode: string) => void) {
       let stream: MediaStream
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: { facingMode: { ideal: 'environment' }, width: { min: 1280, ideal: 3840 }, height: { min: 720, ideal: 2160 } },
         })
       } catch {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: { width: { min: 1280, ideal: 3840 }, height: { min: 720, ideal: 2160 } },
         })
       }
       streamRef.current = stream
@@ -441,8 +441,13 @@ function useBarcodeCamera(onDetected: (barcode: string) => void) {
       // Silently ignored elsewhere — focusMode is not in TS lib.dom yet, hence the cast.
       const videoTrack = stream.getVideoTracks()[0]
       if (videoTrack) {
-        videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet] })
-          .catch(() => {})
+        videoTrack.applyConstraints({
+          advanced: [
+            { focusMode: 'continuous' } as MediaTrackConstraintSet,
+            { exposureMode: 'continuous' } as MediaTrackConstraintSet,
+            { whiteBalanceMode: 'continuous' } as MediaTrackConstraintSet,
+          ],
+        } as MediaTrackConstraints).catch(() => {})
       }
       if (nativeBarcodeSupported) {
         runDetection()

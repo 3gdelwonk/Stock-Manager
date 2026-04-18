@@ -128,15 +128,15 @@ export default function SmartScanner({
       .start(
         { facingMode: 'environment' },
         {
-          fps: 15,
-          qrbox: { width: 300, height: 150 },
+          fps: 30,
+          qrbox: { width: 340, height: 160 },
           aspectRatio: 1.7778,
           disableFlip: true,
           videoConstraints: {
             facingMode: { ideal: 'environment' },
-            width:     { min: 640, ideal: 1920 },
-            height:    { min: 480, ideal: 1080 },
-            frameRate: { ideal: 30 },
+            width:     { min: 1280, ideal: 3840 },
+            height:    { min: 720, ideal: 2160 },
+            frameRate: { ideal: 30, max: 60 },
           } as MediaTrackConstraints,
         },
         (decodedText) => {
@@ -151,6 +151,20 @@ export default function SmartScanner({
         },
         () => {},
       )
+      .then(() => {
+        const videoEl = document.querySelector('#smart-barcode-reader video') as HTMLVideoElement | null
+        const track = videoEl?.srcObject instanceof MediaStream
+          ? videoEl.srcObject.getVideoTracks()[0] : null
+        if (track) {
+          track.applyConstraints({
+            advanced: [
+              { focusMode: 'continuous' } as MediaTrackConstraintSet,
+              { exposureMode: 'continuous' } as MediaTrackConstraintSet,
+              { whiteBalanceMode: 'continuous' } as MediaTrackConstraintSet,
+            ],
+          } as MediaTrackConstraints).catch(() => {})
+        }
+      })
       .catch((err) => {
         setStatus({
           kind: 'error',
