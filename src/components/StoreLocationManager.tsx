@@ -62,6 +62,7 @@ async function resolveCodes(codes: string[]): Promise<string[]> {
 interface Props {
   open: boolean
   onClose: () => void
+  embedded?: boolean
 }
 
 // Colour scheme per level — indigo (Zone) → emerald (Aisle) → amber (Bay) → rose (Row)
@@ -81,7 +82,7 @@ function parentTypeId(typeId: number): number | null {
   return null
 }
 
-export default function StoreLocationManager({ open, onClose }: Props) {
+export default function StoreLocationManager({ open, onClose, embedded }: Props) {
   const [types, setTypes] = useState<LocationType[]>([])
   const [locations, setLocations] = useState<StoreLocation[]>([])
   const [loading, setLoading] = useState(true)
@@ -179,12 +180,12 @@ export default function StoreLocationManager({ open, onClose }: Props) {
   }, [])
 
   useEffect(() => {
-    if (open) {
+    if (open || embedded) {
       setLoading(true)
       setError(null)
       refresh()
     }
-  }, [open, refresh])
+  }, [open, embedded, refresh])
 
   // When focused target changes, load its items
   const selectedId = selected?.id ?? null
@@ -324,7 +325,7 @@ export default function StoreLocationManager({ open, onClose }: Props) {
     }
   }
 
-  if (!open) return null
+  if (!open && !embedded) return null
 
   const typeMap = new Map(types.map(t => [t.id, t.name]))
 
@@ -471,17 +472,23 @@ export default function StoreLocationManager({ open, onClose }: Props) {
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />
-      <div className="fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-2xl shadow-2xl h-[60vh] flex flex-col">
-        {/* Handle + header */}
-        <div className="flex justify-center pt-3 pb-1 shrink-0"><div className="w-10 h-1 bg-gray-300 rounded-full" /></div>
-        <div className="flex items-center justify-between px-4 pb-3 border-b border-gray-100 shrink-0">
-          <div className="flex items-center gap-2">
-            <MapPin size={16} className="text-indigo-600" />
-            <h2 className="text-base font-semibold text-gray-900">Store Locations</h2>
-          </div>
-          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600"><X size={20} /></button>
-        </div>
+      {!embedded && <div className="fixed inset-0 z-40 bg-black/40" onClick={onClose} />}
+      <div className={embedded
+        ? "flex flex-col h-full"
+        : "fixed inset-x-0 bottom-0 z-50 bg-white rounded-t-2xl shadow-2xl h-[60vh] flex flex-col"
+      }>
+        {!embedded && (
+          <>
+            <div className="flex justify-center pt-3 pb-1 shrink-0"><div className="w-10 h-1 bg-gray-300 rounded-full" /></div>
+            <div className="flex items-center justify-between px-4 pb-3 border-b border-gray-100 shrink-0">
+              <div className="flex items-center gap-2">
+                <MapPin size={16} className="text-indigo-600" />
+                <h2 className="text-base font-semibold text-gray-900">Store Locations</h2>
+              </div>
+              <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600"><X size={20} /></button>
+            </div>
+          </>
+        )}
 
         {error && (
           <div className="flex items-center gap-2 mx-4 mt-3 px-3 py-2 bg-red-50 rounded-lg">
