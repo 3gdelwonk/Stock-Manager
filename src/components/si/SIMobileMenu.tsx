@@ -1,4 +1,4 @@
-import { X, Clock, Lightbulb, Zap, Calendar, Mail, ClipboardList, Users, Lock, Warehouse } from 'lucide-react'
+import { X, Clock, Lightbulb, Zap, Calendar, Mail, ClipboardList, Users, Lock, Warehouse, Trash2 } from 'lucide-react'
 import type { SIView } from './SISidebar'
 
 interface SIMobileMenuProps {
@@ -11,6 +11,7 @@ interface SIMobileMenuProps {
 const ITEMS: { id: SIView; label: string; icon: typeof Clock }[] = [
   { id: 'stock', label: 'Stock Browser', icon: Warehouse },
   { id: 'expiry', label: 'Expiry Watch', icon: Clock },
+  { id: 'waste-analytics', label: 'Waste Analytics', icon: Trash2 },
   { id: 'insights', label: 'Insights', icon: Lightbulb },
   { id: 'audit', label: 'Audit Trail', icon: ClipboardList },
   { id: 'quickstock', label: 'Quick Stock', icon: Zap },

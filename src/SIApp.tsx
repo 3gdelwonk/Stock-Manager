@@ -12,11 +12,13 @@ import AuditView from './components/si/AuditView'
 import CustomerManager from './components/si/CustomerManager'
 import PriceLocksView from './components/si/PriceLocksView'
 import SIStockView from './components/si/SIStockView'
+import WasteAnalytics from './components/si/WasteAnalytics'
 
 const STORAGE_KEY = 'si-app-last-view'
 
 const VIEW_TITLES: Record<SIView, string> = {
   expiry: 'Expiry Watch',
+  'waste-analytics': 'Waste Analytics',
   insights: 'Insights',
   quickstock: 'Quick Stock',
   calendar: 'Calendar',
@@ -73,6 +75,7 @@ export default function SIApp() {
   const content = (() => {
     switch (activeView) {
       case 'expiry': return <ExpiryWatch />
+      case 'waste-analytics': return <WasteAnalytics />
       case 'insights': return <InsightsView />
       case 'quickstock': return <QuickStock />
       case 'calendar': return <CalendarView />

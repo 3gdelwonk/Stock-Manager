@@ -551,6 +551,8 @@ function WasteForm({ batch, onDone }: { batch: ExpiryBatch; onDone: () => void }
             <option value="damaged">Damaged</option>
             <option value="quality">Quality Issue</option>
             <option value="recall">Recall</option>
+            <option value="overstock">Overstock</option>
+            <option value="short_dated">Short Dated</option>
             <option value="other">Other</option>
           </select>
         </div>

@@ -1,6 +1,6 @@
-import { Clock, Lightbulb, Zap, Calendar, Mail, Wifi, WifiOff, ClipboardList, Users, Lock, Warehouse } from 'lucide-react'
+import { Clock, Lightbulb, Zap, Calendar, Mail, Wifi, WifiOff, ClipboardList, Users, Lock, Warehouse, Trash2 } from 'lucide-react'
 
-export type SIView = 'expiry' | 'insights' | 'quickstock' | 'calendar' | 'gmail' | 'audit' | 'customers' | 'price-locks' | 'stock'
+export type SIView = 'expiry' | 'waste-analytics' | 'insights' | 'quickstock' | 'calendar' | 'gmail' | 'audit' | 'customers' | 'price-locks' | 'stock'
 
 interface SISidebarProps {
   activeView: SIView
@@ -14,6 +14,7 @@ const NAV_SECTIONS: { label: string; items: { id: SIView; label: string; icon: t
     items: [
       { id: 'stock', label: 'Stock Browser', icon: Warehouse },
       { id: 'expiry', label: 'Expiry Watch', icon: Clock },
+      { id: 'waste-analytics', label: 'Waste Analytics', icon: Trash2 },
       { id: 'insights', label: 'Insights', icon: Lightbulb },
       { id: 'audit', label: 'Audit Trail', icon: ClipboardList },
     ],

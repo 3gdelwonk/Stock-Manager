@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, X, ScanBarcode, DollarSign, Printer, Tag, Clock, PackagePlus, FileText, MapPin, Map } from 'lucide-react'
+import { Plus, X, ScanBarcode, DollarSign, Printer, Tag, Clock, PackagePlus, FileText, MapPin, Map, Trash2 } from 'lucide-react'
 
 interface FABMenuProps {
   onSmartScan: () => void
   onCreateProduct: () => void
   onChangePrice: () => void
   onAddExpiry: () => void
+  onLogWaste: () => void
   onBulkPrint: () => void
   onPromotions: () => void
   onInvoiceDirect: () => void
@@ -17,6 +18,7 @@ const MENU_ITEMS = [
   { key: 'manageLocations', label: 'Manage Locations', icon: Map,         color: 'text-teal-600',   bg: 'bg-teal-50' },
   { key: 'bulkLocation',   label: 'Bulk Location',   icon: MapPin,       color: 'text-indigo-600', bg: 'bg-indigo-50' },
   { key: 'invoiceDirect',  label: 'Invoice Directs', icon: FileText,     color: 'text-slate-600',  bg: 'bg-slate-50' },
+  { key: 'logWaste',       label: 'Log Waste',        icon: Trash2,       color: 'text-red-600',    bg: 'bg-red-50' },
   { key: 'addExpiry',      label: 'Add Expiry',      icon: Clock,        color: 'text-purple-600', bg: 'bg-purple-50' },
   { key: 'promotions',     label: 'Promotions',      icon: Tag,          color: 'text-amber-600',  bg: 'bg-amber-50' },
   { key: 'bulkPrint',      label: 'Bulk Print',      icon: Printer,      color: 'text-rose-600',   bg: 'bg-rose-50' },
@@ -30,6 +32,7 @@ export default function FABMenu({
   onCreateProduct,
   onChangePrice,
   onAddExpiry,
+  onLogWaste,
   onBulkPrint,
   onPromotions,
   onInvoiceDirect,
@@ -53,6 +56,7 @@ export default function FABMenu({
     createProduct: onCreateProduct,
     changePrice: onChangePrice,
     addExpiry: onAddExpiry,
+    logWaste: onLogWaste,
     bulkPrint: onBulkPrint,
     promotions: onPromotions,
     invoiceDirect: onInvoiceDirect,

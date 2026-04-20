@@ -95,15 +95,17 @@ export interface ExpiryBatch {
 // ─── Waste Log ──────────��────────────────────────────────��────────────────
 export interface WasteLogEntry {
   id?: number
-  batchId: number
+  batchId?: number
   barcode: string
   itemCode: string
   productName: string
   department: string
   qty: number
+  weightKg?: number
+  unitType?: 'each' | 'kg'
   costPrice: number
   sellPrice: number
-  reason: 'expired' | 'damaged' | 'quality' | 'recall' | 'other'
+  reason: 'expired' | 'damaged' | 'quality' | 'recall' | 'overstock' | 'short_dated' | 'other'
   claimable: boolean
   claimStatus: 'none' | 'pending' | 'submitted' | 'approved' | 'rejected'
   claimAmount?: number

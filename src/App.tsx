@@ -22,6 +22,7 @@ import CreatePromoSheet from './components/CreatePromoSheet'
 import InvoiceDirectSheet from './components/InvoiceDirectSheet'
 import BulkLocationSheet from './components/BulkLocationSheet'
 import StoreLocationManager from './components/StoreLocationManager'
+import QuickWasteSheet from './components/QuickWasteSheet'
 import { pruneImageCache } from './lib/db'
 
 // ─── Update banner ────────────────────────────────────────────────────────────
@@ -131,6 +132,7 @@ export default function App() {
   const [bulkPrintOpen, setBulkPrintOpen] = useState(false)
   const [createPromoOpen, setCreatePromoOpen] = useState(false)
   const [invoiceDirectOpen, setInvoiceDirectOpen] = useState(false)
+  const [quickWasteOpen, setQuickWasteOpen] = useState(false)
   const [bulkLocationOpen, setBulkLocationOpen] = useState(false)
   const [manageLocationsOpen, setManageLocationsOpen] = useState(false)
 
@@ -198,6 +200,7 @@ export default function App() {
         onCreateProduct={() => setCreateSheetOpen(true)}
         onChangePrice={() => setPriceChangeOpen(true)}
         onAddExpiry={() => setAddBatchOpen(true)}
+        onLogWaste={() => setQuickWasteOpen(true)}
         onBulkPrint={() => setBulkPrintOpen(true)}
         onPromotions={() => setCreatePromoOpen(true)}
         onInvoiceDirect={() => setInvoiceDirectOpen(true)}
@@ -243,6 +246,11 @@ export default function App() {
       <AddBatchSheet
         open={addBatchOpen}
         onClose={() => setAddBatchOpen(false)}
+      />
+
+      <QuickWasteSheet
+        open={quickWasteOpen}
+        onClose={() => setQuickWasteOpen(false)}
       />
 
       <CreatePromoSheet

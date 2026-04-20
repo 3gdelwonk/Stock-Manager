@@ -77,6 +77,9 @@ class GroceryManagerDB extends Dexie {
     this.version(6).stores({
       connectionLog:     '++id, connected, checkedAt',
     })
+    this.version(7).stores({
+      wasteLog: '++id, batchId, barcode, loggedAt, claimStatus, department, [department+loggedAt]',
+    })
   }
 }
 

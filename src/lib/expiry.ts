@@ -96,6 +96,61 @@ export async function markAsWaste(
   })
 }
 
+// ─── Log Daily Waste (no batch required) ──────────────────────────────────
+
+export async function logDailyWaste(entry: {
+  barcode: string
+  itemCode: string
+  productName: string
+  department: string
+  qty: number
+  weightKg?: number
+  unitType?: 'each' | 'kg'
+  costPrice: number
+  sellPrice: number
+  reason: WasteLogEntry['reason']
+  claimable: boolean
+  notes?: string
+  batchId?: number
+}): Promise<number> {
+  if (entry.batchId) {
+    const batch = await db.expiryBatches.get(entry.batchId)
+    if (batch) {
+      const newRemaining = batch.qtyRemaining - entry.qty
+      await db.expiryBatches.update(entry.batchId, {
+        qtyRemaining: Math.max(0, newRemaining),
+        status: newRemaining <= 0 ? 'wasted' : 'active',
+        updatedAt: new Date(),
+      })
+    }
+  }
+
+  return db.wasteLog.add({
+    batchId: entry.batchId,
+    barcode: entry.barcode,
+    itemCode: entry.itemCode,
+    productName: entry.productName,
+    department: entry.department,
+    qty: entry.qty,
+    weightKg: entry.weightKg,
+    unitType: entry.unitType,
+    costPrice: entry.costPrice,
+    sellPrice: entry.sellPrice,
+    reason: entry.reason,
+    claimable: entry.claimable,
+    claimStatus: entry.claimable ? 'pending' : 'none',
+    loggedAt: new Date(),
+    notes: entry.notes,
+  } as WasteLogEntry) as Promise<number>
+}
+
+export async function findMatchingBatches(barcode: string): Promise<ExpiryBatch[]> {
+  return db.expiryBatches
+    .where('barcode').equals(barcode)
+    .filter(b => b.status === 'active')
+    .sortBy('expiryDate')
+}
+
 // ─── Mark as Sold ─────────────────────────────────────────────────────────
 
 export async function markAsSold(batchId: number, qty: number): Promise<void> {
