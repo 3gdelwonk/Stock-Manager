@@ -603,12 +603,49 @@ export async function searchProduceItems(query: string, limit = 20, days = 7): P
   }
 }
 
+function depluralize(word: string): string {
+  if (word.length <= 3) return word
+  if (word.endsWith('ies')) return word.slice(0, -3) + 'y'
+  if (word.endsWith('oes')) return word.slice(0, -2)
+  if (word.endsWith('ches') || word.endsWith('shes')) return word.slice(0, -2)
+  if (word.endsWith('ses') || word.endsWith('xes') || word.endsWith('zes')) return word.slice(0, -2)
+  if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1)
+  return word
+}
+
+function normalizeProduceQuery(query: string): string {
+  return query.trim().toLowerCase().split(/\s+/).map(depluralize).join(' ')
+}
+
 export async function searchWithProducePriority(query: string, limit = 20): Promise<SearchResult> {
-  const [produce, generic] = await Promise.allSettled([
-    searchProduceItems(query, limit),
-    searchItems(query, limit),
+  const trimmed = query.trim()
+  const normalized = normalizeProduceQuery(trimmed)
+  const hasVariant = normalized !== trimmed.toLowerCase()
+
+  const produceSearches = Promise.allSettled(
+    hasVariant
+      ? [searchProduceItems(trimmed, limit), searchProduceItems(normalized, limit)]
+      : [searchProduceItems(trimmed, limit)],
+  )
+
+  const [produceResults, generic] = await Promise.allSettled([
+    produceSearches,
+    searchItems(hasVariant ? normalized : trimmed, limit),
   ])
-  if (produce.status === 'fulfilled' && produce.value.items.length > 0) return produce.value
+
+  if (produceResults.status === 'fulfilled') {
+    const seen = new Set<string>()
+    const items: SearchResult['items'] = []
+    for (const r of produceResults.value) {
+      if (r.status === 'fulfilled') {
+        for (const item of r.value.items) {
+          if (!seen.has(item.itemCode)) { seen.add(item.itemCode); items.push(item) }
+        }
+      }
+    }
+    if (items.length > 0) return { items: items.slice(0, limit), total: items.length }
+  }
+
   if (generic.status === 'fulfilled' && generic.value.items.length > 0) {
     const produceOnly = generic.value.items.filter(i =>
       mapDepartmentName(i.department) === 'fresh_produce',
