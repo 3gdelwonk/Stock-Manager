@@ -58,6 +58,10 @@ export default function QuickPriceChangeSheet({ open, onClose }: QuickPriceChang
       }
       try {
         const jarvisResult = await searchWithProducePriority(trimmed, 10)
+        const hasProduceResults = jarvisResult.items.some(i => i.department.toUpperCase().includes('PRODUCE') || i.department.toUpperCase().includes('FRUIT'))
+        if (hasProduceResults) {
+          merged.clear()
+        }
         for (const item of jarvisResult.items) {
           const key = item.itemCode || item.barcode || ''
           if (!merged.has(key)) merged.set(key, { itemCode: item.itemCode, barcode: item.barcode || '', name: item.description, department: item.department, sellPrice: item.sellPrice })

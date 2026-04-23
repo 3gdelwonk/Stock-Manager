@@ -4,6 +4,8 @@
 // All requests authenticated with X-API-Key header
 // ═══════════════════════════════════════════════
 
+import { mapDepartmentName } from './constants'
+
 const DEFAULT_URL = 'https://api.jarvismart196410.uk'
 const DEFAULT_KEY = 'jmart_sk_7f3a9c2e1b4d8f6a0e5c3b9d'
 
@@ -607,7 +609,13 @@ export async function searchWithProducePriority(query: string, limit = 20): Prom
     searchItems(query, limit),
   ])
   if (produce.status === 'fulfilled' && produce.value.items.length > 0) return produce.value
-  if (generic.status === 'fulfilled') return generic.value
+  if (generic.status === 'fulfilled' && generic.value.items.length > 0) {
+    const produceOnly = generic.value.items.filter(i =>
+      mapDepartmentName(i.department) === 'fresh_produce',
+    )
+    if (produceOnly.length > 0) return { items: produceOnly.slice(0, limit), total: produceOnly.length }
+    return generic.value
+  }
   return { items: [], total: 0 }
 }
 
