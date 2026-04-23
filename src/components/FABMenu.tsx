@@ -81,22 +81,26 @@ export default function FABMenu({
 
       {/* FAB container — bottom right, above tab bar */}
       <div className="absolute bottom-14 right-3 z-50 flex flex-col items-end gap-3 pb-safe">
-        {/* Menu items — stack upward */}
-        {open && MENU_ITEMS.map(({ key, label, icon: Icon, color, bg }, i) => (
-          <button
-            key={key}
-            onClick={() => handleAction(key)}
-            className="flex items-center gap-2.5 pl-4 pr-3 py-2.5 bg-white rounded-full shadow-lg border border-gray-100 hover:shadow-xl active:scale-95 transition-all"
-            style={{
-              animation: `fab-item-in 0.2s ease-out ${i * 0.04}s both`,
-            }}
-          >
-            <span className="text-sm font-medium text-gray-800 whitespace-nowrap">{label}</span>
-            <span className={`w-9 h-9 rounded-full ${bg} flex items-center justify-center shrink-0`}>
-              <Icon size={18} className={color} />
-            </span>
-          </button>
-        ))}
+        {/* Menu items — stack upward, scrollable on short screens */}
+        {open && (
+          <div className="overflow-y-auto max-h-[calc(100dvh-10rem)] flex flex-col items-end gap-3 overscroll-contain">
+            {MENU_ITEMS.map(({ key, label, icon: Icon, color, bg }, i) => (
+              <button
+                key={key}
+                onClick={() => handleAction(key)}
+                className="flex items-center gap-2.5 pl-4 pr-3 py-2.5 bg-white rounded-full shadow-lg border border-gray-100 hover:shadow-xl active:scale-95 transition-all shrink-0"
+                style={{
+                  animation: `fab-item-in 0.2s ease-out ${i * 0.04}s both`,
+                }}
+              >
+                <span className="text-sm font-medium text-gray-800 whitespace-nowrap">{label}</span>
+                <span className={`w-9 h-9 rounded-full ${bg} flex items-center justify-center shrink-0`}>
+                  <Icon size={18} className={color} />
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* FAB button */}
         <button
