@@ -70,11 +70,13 @@ function ClaimStatusBadge({ status }: { status: WasteLogEntry['claimStatus'] }) 
 // ─── Reason badge ────────────────────────────────────────────────────────────
 function ReasonBadge({ reason }: { reason: WasteLogEntry['reason'] }) {
   const map: Record<WasteLogEntry['reason'], string> = {
-    expired:  'bg-red-100 text-red-700',
-    damaged:  'bg-orange-100 text-orange-700',
-    quality:  'bg-amber-100 text-amber-700',
-    recall:   'bg-purple-100 text-purple-700',
-    other:    'bg-gray-100 text-gray-600',
+    expired:     'bg-red-100 text-red-700',
+    damaged:     'bg-orange-100 text-orange-700',
+    quality:     'bg-amber-100 text-amber-700',
+    recall:      'bg-purple-100 text-purple-700',
+    overstock:   'bg-blue-100 text-blue-700',
+    short_dated: 'bg-teal-100 text-teal-700',
+    other:       'bg-gray-100 text-gray-600',
   }
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${map[reason]}`}>
