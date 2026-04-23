@@ -56,7 +56,7 @@ export default function CrewWaste() {
 
   const todayTotal = useMemo(() => {
     if (!todayEntries) return 0
-    return todayEntries.reduce((s, e) => s + e.qty * e.costPrice, 0)
+    return todayEntries.reduce((s, e) => s + (e.unitType === 'kg' && e.weightKg ? e.weightKg * e.costPrice : e.qty * e.costPrice), 0)
   }, [todayEntries])
 
   const fillFromProduct = useCallback(async (barcode: string, name: string, dept: string, cost: number, sell: number, code: string) => {
@@ -65,7 +65,7 @@ export default function CrewWaste() {
     setCostPrice(cost > 0 ? cost.toFixed(2) : '')
     setSellPrice(sell > 0 ? sell.toFixed(2) : '')
     setItemCode(code)
-    setIsWeighItem(dept === 'fresh_produce' || dept === 'meat')
+    setIsWeighItem(/\/\s*KG|PER\s*KG|P\/\s*KG/i.test(name))
     setLookupDone(true)
 
     if (barcode) {
@@ -299,10 +299,7 @@ export default function CrewWaste() {
           <label className="block text-xs font-medium text-gray-700 mb-1">Department</label>
           <select
             value={department}
-            onChange={e => {
-              setDepartment(e.target.value)
-              setIsWeighItem(e.target.value === 'fresh_produce' || e.target.value === 'meat')
-            }}
+            onChange={e => setDepartment(e.target.value)}
             className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-400 bg-white"
           >
             <option value="">Select department</option>
@@ -353,7 +350,7 @@ export default function CrewWaste() {
         {/* Cost / Sell price */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Cost Price</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">{isWeighItem ? 'Cost/kg' : 'Cost Price'}</label>
             <input
               type="number"
               step="0.01"
@@ -365,7 +362,7 @@ export default function CrewWaste() {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Sell Price</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">{isWeighItem ? 'Sell/kg' : 'Sell Price'}</label>
             <input
               type="number"
               step="0.01"
@@ -377,6 +374,13 @@ export default function CrewWaste() {
             />
           </div>
         </div>
+
+        {isWeighItem && parseFloat(weightKg) > 0 && parseFloat(costPrice) > 0 && (
+          <div className="flex items-center justify-between px-3 py-2 bg-red-50 rounded-lg">
+            <span className="text-xs text-red-700 font-medium">Waste Value</span>
+            <span className="text-sm font-semibold text-red-700">${(parseFloat(weightKg) * parseFloat(costPrice)).toFixed(2)}</span>
+          </div>
+        )}
 
         {/* Reason */}
         <div>
@@ -456,7 +460,7 @@ export default function CrewWaste() {
                       </p>
                     </div>
                     <span className="text-xs font-semibold text-red-600 shrink-0">
-                      ${(e.qty * e.costPrice).toFixed(2)}
+                      ${(e.unitType === 'kg' && e.weightKg ? e.weightKg * e.costPrice : e.qty * e.costPrice).toFixed(2)}
                     </span>
                   </div>
                 ))}
