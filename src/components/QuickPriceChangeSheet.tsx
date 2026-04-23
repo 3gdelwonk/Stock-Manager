@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, ScanBarcode, X, DollarSign, Loader2, Check, Trash2, Send, Tag, AlertCircle, Lock } from 'lucide-react'
 import { db } from '../lib/db'
-import { searchItems, changeAndSend, printLabel, setPriceLock } from '../lib/jarvis'
+import { searchWithProducePriority, changeAndSend, printLabel, setPriceLock } from '../lib/jarvis'
 import BarcodeScanner from './BarcodeScanner'
 import { DEPARTMENT_LABELS } from '../lib/constants'
 
@@ -57,7 +57,7 @@ export default function QuickPriceChangeSheet({ open, onClose }: QuickPriceChang
         merged.set(p.itemCode || p.barcode, { itemCode: p.itemCode, barcode: p.barcode, name: p.name, department: p.department, sellPrice: p.sellPrice })
       }
       try {
-        const jarvisResult = await searchItems(trimmed, 10)
+        const jarvisResult = await searchWithProducePriority(trimmed, 10)
         for (const item of jarvisResult.items) {
           const key = item.itemCode || item.barcode || ''
           if (!merged.has(key)) merged.set(key, { itemCode: item.itemCode, barcode: item.barcode || '', name: item.description, department: item.department, sellPrice: item.sellPrice })

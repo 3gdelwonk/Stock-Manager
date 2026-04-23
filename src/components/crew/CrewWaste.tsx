@@ -3,7 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { ScanBarcode, Search, Check, Trash2, Scale, Package, ChevronDown, ChevronUp } from 'lucide-react'
 import { db } from '../../lib/db'
 import { logDailyWaste, findMatchingBatches } from '../../lib/expiry'
-import { searchItems, adjustStock } from '../../lib/jarvis'
+import { searchWithProducePriority, adjustStock } from '../../lib/jarvis'
 import { resolveBarcode } from '../../lib/barcodeResolver'
 import BarcodeScanner from '../BarcodeScanner'
 import { DEPARTMENT_ORDER, DEPARTMENT_LABELS } from '../../lib/constants'
@@ -109,7 +109,7 @@ export default function CrewWaste() {
     } catch { /* resolver unavailable */ }
 
     try {
-      const result = await searchItems(trimmed, 1)
+      const result = await searchWithProducePriority(trimmed, 1)
       if (result.items?.length > 0) {
         const item = result.items[0]
         await fillFromProduct(item.barcode || trimmed, item.description, item.department, item.avgCost, item.sellPrice, item.itemCode)
@@ -124,7 +124,7 @@ export default function CrewWaste() {
     const q = searchInput.trim()
     if (!q) return
     try {
-      const result = await searchItems(q, 10)
+      const result = await searchWithProducePriority(q, 10)
       setSearchResults(result.items || [])
       setSearchOpen(true)
     } catch {
