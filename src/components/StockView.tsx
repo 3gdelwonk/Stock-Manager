@@ -27,6 +27,7 @@ import PriceChangeModal from './PriceChangeModal'
 import CompetitivePriceSheet from './CompetitivePriceSheet'
 import AddBatchSheet from './AddBatchSheet'
 import StockAdjustModal from './StockAdjustModal'
+import SalesHistoryPanel from './SalesHistoryPanel'
 import PromotionsView from './PromotionsView'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -643,6 +644,9 @@ const StockCard = memo(function StockCard({
               ))}
             </div>
           )}
+
+          {/* Sales history */}
+          <SalesHistoryPanel itemCode={stock.itemCode} compact />
 
           {/* Action message */}
           {actionMsg && (

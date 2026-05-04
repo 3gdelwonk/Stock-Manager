@@ -19,6 +19,7 @@ import PriceChangeModal from '../PriceChangeModal'
 import CompetitivePriceSheet from '../CompetitivePriceSheet'
 import AddBatchSheet from '../AddBatchSheet'
 import StockAdjustModal from '../StockAdjustModal'
+import SalesHistoryPanel from '../SalesHistoryPanel'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -360,6 +361,9 @@ const StockRowDetail = memo(function StockRowDetail({
                 ))}
               </div>
             )}
+
+            {/* Sales history */}
+            <SalesHistoryPanel itemCode={stock.itemCode} />
 
             {/* Action message */}
             {actionMsg && (
